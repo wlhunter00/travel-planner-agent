@@ -1,36 +1,58 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Travel Planner Agent
+
+An AI-powered travel planning web app with a Cursor-like split-pane layout. An itinerary viewer on the left builds up as you plan, and a chat panel on the right lets you converse with an AI travel agent.
+
+## Features
+
+- **7-phase guided planning**: Big picture, flights, cities, hotels, day plans, restaurants, review
+- **Real-time data**: Flights (Kiwi.com), hotels (SerpAPI), places (Google Places), tours (Viator), web search (Exa)
+- **Deep research**: Multi-source parallel search combining Reddit, travel blogs, and structured APIs
+- **Persistent memory**: Learns your travel preferences across sessions
+- **Multi-trip management**: Save and resume multiple trip plans
+- **Export**: JSON, CSV, and iCal formats
+- **Auto-save**: Trip state and chat history persist automatically
 
 ## Getting Started
 
-First, run the development server:
+1. Follow [SETUP.md](SETUP.md) to get all API keys.
+
+2. Install dependencies:
+
+```bash
+npm install
+```
+
+3. Copy and fill in environment variables:
+
+```bash
+cp .env.example .env.local
+# Edit .env.local with your API keys
+```
+
+4. Run the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+5. Open [http://localhost:3000](http://localhost:3000)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Tech Stack
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **Next.js 16** (App Router)
+- **Vercel AI SDK v6** with OpenAI provider
+- **React 19** + **shadcn/ui**
+- **Tailwind CSS v4**
+- **Zustand** for state management
 
-## Learn More
+## API Integrations
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Service | Purpose | Auth |
+|---------|---------|------|
+| OpenAI (gpt-4o) | Core reasoning | API key |
+| Google Places API | Place search, photos, reviews | API key |
+| Google Directions API | Routing (all modes) | API key |
+| Kiwi.com | Flight search | Free, no key |
+| SerpAPI | Hotel search with pricing | API key |
+| Viator | Tours and activities | API key |
+| Exa | Web search for grounding | API key |
