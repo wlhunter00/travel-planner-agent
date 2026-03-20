@@ -138,11 +138,23 @@ export interface Trip {
   coverImage?: string;
 }
 
+export interface ChatMessagePart {
+  type: string;
+  text?: string;
+  toolName?: string;
+  args?: unknown;
+  result?: unknown;
+  state?: string;
+  toolCallId?: string;
+  [key: string]: unknown;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant" | "system" | "tool";
   content: string;
   id?: string;
   toolInvocations?: unknown[];
+  parts?: ChatMessagePart[];
 }
 
 export function createEmptyTripState(): TripState {

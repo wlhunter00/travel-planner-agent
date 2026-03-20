@@ -1,14 +1,17 @@
-interface RouteParams {
+export type RouteMode = "driving" | "walking" | "transit" | "bicycling";
+
+export interface RouteLegInput {
+  origin: string;
+  destination: string;
+  mode?: RouteMode;
+}
+
+export interface RouteLegResult {
   origin: string;
   destination: string;
   mode: string;
-}
-
-interface RouteResult {
-  duration: string;
-  distance: string;
-  steps?: string[];
-  mode: string;
+  duration: string | null;
+  distance: string | null;
 }
 
 const MODE_MAP: Record<string, string> = {
@@ -18,16 +21,24 @@ const MODE_MAP: Record<string, string> = {
   bicycling: "bicycling",
 };
 
-export async function computeTransitRoute(params: RouteParams): Promise<RouteResult | null> {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) return null;
+export const MAX_ROUTES_BATCH = 10;
 
-  const mode = MODE_MAP[params.mode] || "transit";
+async function fetchOneLeg(
+  origin: string,
+  destination: string,
+  modeKey: string
+): Promise<{ duration: string | null; distance: string | null }> {
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!apiKey) {
+    return { duration: null, distance: null };
+  }
+
+  const mode = MODE_MAP[modeKey] || "walking";
 
   try {
     const searchParams = new URLSearchParams({
-      origin: params.origin,
-      destination: params.destination,
+      origin,
+      destination,
       mode,
       key: apiKey,
     });
@@ -36,24 +47,51 @@ export async function computeTransitRoute(params: RouteParams): Promise<RouteRes
       `https://maps.googleapis.com/maps/api/directions/json?${searchParams}`
     );
 
-    if (!res.ok) return null;
+    if (!res.ok) {
+      return { duration: null, distance: null };
+    }
 
     const data = await res.json();
-    if (!data.routes?.length) return null;
+    if (!data.routes?.length) {
+      return { duration: null, distance: null };
+    }
 
-    const route = data.routes[0];
-    const leg = route.legs[0];
-
+    const leg = data.routes[0].legs[0];
     return {
-      duration: leg.duration.text,
-      distance: leg.distance.text,
-      steps: leg.steps?.slice(0, 5).map((s: Record<string, unknown>) =>
-        (s.html_instructions as string)?.replace(/<[^>]*>/g, "")
-      ),
-      mode,
+      duration: leg.duration?.text ?? null,
+      distance: leg.distance?.text ?? null,
     };
   } catch (error) {
     console.error("Directions API error:", error);
-    return null;
+    return { duration: null, distance: null };
   }
+}
+
+/**
+ * Compute travel time and distance for multiple origin–destination pairs in one tool call.
+ * Each leg uses Google Directions API (parallel). Cap: MAX_ROUTES_BATCH per request.
+ */
+export async function computeRoutesBatch(input: {
+  routes: RouteLegInput[];
+}): Promise<{ routes: RouteLegResult[] }> {
+  const legs = (input.routes ?? []).slice(0, MAX_ROUTES_BATCH);
+  const settled = await Promise.all(
+    legs.map(async (leg) => {
+      const modeKey = leg.mode ?? "walking";
+      const { duration, distance } = await fetchOneLeg(
+        leg.origin,
+        leg.destination,
+        modeKey
+      );
+      return {
+        origin: leg.origin,
+        destination: leg.destination,
+        mode: MODE_MAP[modeKey] || "walking",
+        duration,
+        distance,
+      } satisfies RouteLegResult;
+    })
+  );
+
+  return { routes: settled };
 }

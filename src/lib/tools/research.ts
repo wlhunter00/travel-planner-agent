@@ -1,5 +1,5 @@
 import { webSearch } from "./exa";
-import { searchTours } from "./viator";
+import { searchTours } from "./exa-tours";
 import { searchPlaces } from "./google-places";
 
 interface DeepResearchParams {
@@ -77,7 +77,7 @@ export async function deepResearch(
     if (val.tours && Array.isArray(val.tours)) {
       (val.tours as Record<string, unknown>[]).forEach((t) => {
         allResults.push({
-          source: "Viator",
+          source: "Tours",
           title: (t.title as string) || "",
           snippet: (t.description as string) || "",
           url: t.bookingUrl as string,

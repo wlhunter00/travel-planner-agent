@@ -5,7 +5,7 @@ An AI-powered travel planning web app with a Cursor-like split-pane layout. An i
 ## Features
 
 - **7-phase guided planning**: Big picture, flights, cities, hotels, day plans, restaurants, review
-- **Real-time data**: Flights (Kiwi.com), hotels (SerpAPI), places (Google Places), tours (Viator), web search (Exa)
+- **Real-time data**: Flights (Google Flights via SerpAPI), hotels (SerpAPI), places (Google Places), tours (Peek.com MCP + Exa), web search (Exa)
 - **Deep research**: Multi-source parallel search combining Reddit, travel blogs, and structured APIs
 - **Persistent memory**: Learns your travel preferences across sessions
 - **Multi-trip management**: Save and resume multiple trip plans
@@ -52,7 +52,6 @@ npm run dev
 | OpenAI (gpt-4o) | Core reasoning | API key |
 | Google Places API | Place search, photos, reviews | API key |
 | Google Directions API | Routing (all modes) | API key |
-| Kiwi.com | Flight search | Free, no key |
-| SerpAPI | Hotel search with pricing | API key |
-| Viator | Tours and activities | API key |
-| Exa | Web search for grounding | API key |
+| SerpAPI | Flight search + hotel search | API key |
+| Peek.com MCP | Tours and activities | Free, no key |
+| Exa | Web search + tour discovery | API key |

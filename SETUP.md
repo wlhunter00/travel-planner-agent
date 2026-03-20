@@ -48,7 +48,7 @@ Exa provides AI-optimized web search for grounding recommendations.
 
 ## 4. SerpAPI Key
 
-SerpAPI scrapes Google Hotels for real hotel pricing and booking links.
+SerpAPI powers both hotel search (Google Hotels) and flight search (Google Flights) with one key.
 
 1. Go to [serpapi.com](https://serpapi.com/) and sign up
 2. Your API key is shown on the dashboard after signup
@@ -56,23 +56,15 @@ SerpAPI scrapes Google Hotels for real hotel pricing and booking links.
 
 **Free tier**: 250 searches/month. Starter plan: $25/month for 1,000 searches.
 
-## 5. Kiwi.com MCP (Flights)
+## 6. Peek.com MCP (Tours & Activities)
 
-No API key needed. The Kiwi.com MCP server is free and open access.
+No API key needed. The Peek.com MCP server provides real-time tour and activity data with availability and pricing.
 
-- Endpoint: `https://api.tequila.kiwi.com/mcp` (Streamable HTTP)
+- Endpoint: `https://mcp.peek.com` (Streamable HTTP), or override with `PEEK_MCP_ENDPOINT` in `.env`
 - The app connects to this automatically
+- **Usage:** `search_experiences` must use a `regionId` from `search_regions` (opaque ids like `r0dakr`). City names or guessed ids cause Peek to return server errors; the app wraps those so the model gets guidance instead of a bare tool failure.
 
-## 6. Viator Partner API
-
-Viator provides structured tour and activity data with booking links.
-
-1. Go to [viator.com/partners](https://www.viator.com/partners) and sign up for a partner account
-2. Select **Basic Access** (self-service, no approval needed)
-3. Once registered, find your API key in the partner dashboard
-4. Copy the key
-
-**Free**: Basic access has no cost.
+Exa is also used as a secondary source for tour discovery across Viator, GetYourGuide, and TripAdvisor (covered by your Exa key above).
 
 ## Configure Environment Variables
 
@@ -89,7 +81,6 @@ OPENAI_API_KEY=sk-...
 GOOGLE_MAPS_API_KEY=AIza...
 EXA_API_KEY=...
 SERPAPI_API_KEY=...
-VIATOR_API_KEY=...
 ```
 
 ## Verify Keys

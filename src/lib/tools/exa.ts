@@ -27,7 +27,11 @@ export async function webSearch(params: WebSearchParams): Promise<{ results: Sea
         useAutoprompt: true,
         type: "auto",
         contents: {
-          text: { maxCharacters: 500 },
+          highlights: {
+            numSentences: 3,
+            highlightsPerUrl: 1,
+          },
+          text: { maxCharacters: 300 },
         },
       }),
     });
@@ -35,12 +39,21 @@ export async function webSearch(params: WebSearchParams): Promise<{ results: Sea
     if (!res.ok) return { results: [] };
 
     const data = await res.json();
-    const results: SearchResult[] = (data.results || []).map((r: Record<string, unknown>) => ({
-      title: r.title as string,
-      url: r.url as string,
-      snippet: (r.text as string) || (r.highlights as string[])?.[0] || "",
-      publishedDate: r.publishedDate as string,
-    }));
+    const results: SearchResult[] = (data.results || []).map((r: Record<string, unknown>) => {
+      const highlights = r.highlights as string[] | undefined;
+      const text = r.text as string | undefined;
+      const snippet =
+        highlights && highlights.length > 0
+          ? highlights.join(" ")
+          : text?.trim() || "";
+
+      return {
+        title: r.title as string,
+        url: r.url as string,
+        snippet,
+        publishedDate: r.publishedDate as string,
+      };
+    });
 
     return { results };
   } catch (error) {

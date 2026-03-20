@@ -4,6 +4,8 @@ interface HotelSearchParams {
   checkOut: string;
   adults: number;
   sortBy: string;
+  minPrice?: number;
+  maxPrice?: number;
 }
 
 interface HotelResult {
@@ -24,10 +26,16 @@ const SORT_MAP: Record<string, number> = {
   highest_rating: 6,
 };
 
-export async function searchHotels(params: HotelSearchParams): Promise<{ hotels: HotelResult[] }> {
+const EMPTY_HOTELS_NOTE =
+  "No hotel results from the search provider. Aggregator inventory for dates many months out is often sparse or unreliable — do not retry the same query repeatedly. Prefer search_places + web_search (or official hotel sites) to name concrete properties and check pricing.";
+
+export async function searchHotels(params: HotelSearchParams): Promise<{
+  hotels: HotelResult[];
+  note?: string;
+}> {
   const apiKey = process.env.SERPAPI_API_KEY;
   if (!apiKey) {
-    return { hotels: [] };
+    return { hotels: [], note: EMPTY_HOTELS_NOTE };
   }
 
   const searchParams = new URLSearchParams({
@@ -43,12 +51,24 @@ export async function searchHotels(params: HotelSearchParams): Promise<{ hotels:
     api_key: apiKey,
   });
 
+  if (params.minPrice != null && params.minPrice > 0) {
+    searchParams.set("min_price", String(params.minPrice));
+  }
+  if (params.maxPrice != null && params.maxPrice > 0) {
+    searchParams.set("max_price", String(params.maxPrice));
+  }
+
   try {
     const res = await fetch(`https://serpapi.com/search.json?${searchParams}`);
-    if (!res.ok) return { hotels: [] };
+    if (!res.ok) {
+      return { hotels: [], note: EMPTY_HOTELS_NOTE };
+    }
 
     const data = await res.json();
     const properties = data.properties || [];
+    if (properties.length === 0) {
+      return { hotels: [], note: EMPTY_HOTELS_NOTE };
+    }
 
     const hotels: HotelResult[] = properties.slice(0, 5).map((p: Record<string, unknown>, i: number) => ({
       id: `hotel-${i}`,
@@ -67,6 +87,6 @@ export async function searchHotels(params: HotelSearchParams): Promise<{ hotels:
     return { hotels };
   } catch (error) {
     console.error("SerpAPI hotel search error:", error);
-    return { hotels: [] };
+    return { hotels: [], note: EMPTY_HOTELS_NOTE };
   }
 }

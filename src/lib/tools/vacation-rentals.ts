@@ -40,12 +40,15 @@ const SORT_MAP: Record<string, number> = {
   highest_rating: 3,
 };
 
+const EMPTY_RENTALS_NOTE =
+  "No vacation rental results from the search provider. Inventory far in advance can be empty — do not retry the same query repeatedly. Prefer search_airbnb (if the user wants rentals), search_places + web_search, or narrow dates/area and try once more only.";
+
 export async function searchVacationRentals(
   params: VacationRentalSearchParams
-): Promise<{ rentals: VacationRentalResult[] }> {
+): Promise<{ rentals: VacationRentalResult[]; note?: string }> {
   const apiKey = process.env.SERPAPI_API_KEY;
   if (!apiKey) {
-    return { rentals: [] };
+    return { rentals: [], note: EMPTY_RENTALS_NOTE };
   }
 
   const searchParams = new URLSearchParams({
@@ -72,10 +75,15 @@ export async function searchVacationRentals(
 
   try {
     const res = await fetch(`https://serpapi.com/search.json?${searchParams}`);
-    if (!res.ok) return { rentals: [] };
+    if (!res.ok) {
+      return { rentals: [], note: EMPTY_RENTALS_NOTE };
+    }
 
     const data = await res.json();
     const properties = data.properties || [];
+    if (properties.length === 0) {
+      return { rentals: [], note: EMPTY_RENTALS_NOTE };
+    }
 
     const rentals: VacationRentalResult[] = properties
       .slice(0, 8)
@@ -113,7 +121,7 @@ export async function searchVacationRentals(
     return { rentals };
   } catch (error) {
     console.error("SerpAPI vacation rental search error:", error);
-    return { rentals: [] };
+    return { rentals: [], note: EMPTY_RENTALS_NOTE };
   }
 }
 
