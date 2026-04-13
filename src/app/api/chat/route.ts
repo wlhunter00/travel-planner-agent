@@ -21,6 +21,23 @@ import type { Tool } from "ai";
 export const maxDuration = 300;
 
 /**
+ * Recursively replace photoUrl string values with "[photo]" to reduce token
+ * bloat in historical tool results sent back to the model. The UI retains
+ * the original URLs — this only affects the model's view on subsequent turns.
+ */
+function stripPhotoUrls(obj: unknown): unknown {
+  if (Array.isArray(obj)) return obj.map(stripPhotoUrls);
+  if (typeof obj === "object" && obj !== null) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj)) {
+      out[k] = k === "photoUrl" && typeof v === "string" ? "[photo]" : stripPhotoUrls(v);
+    }
+    return out;
+  }
+  return obj;
+}
+
+/**
  * Each chat POST is stateless. Assistant UI parts retain OpenAI Responses `itemId`s
  * from the prior stream; with default store:true the provider turns those into
  * `item_reference` instead of text, which is invalid on a new HTTP request.
@@ -46,6 +63,9 @@ function sanitizeMessagesForStatelessRequest(raw: unknown[]): UIMessage[] {
         const next = { ...part } as Record<string, unknown>;
         delete next.providerMetadata;
         delete next.callProviderMetadata;
+        if (next.type === "tool-invocation" && next.result !== undefined) {
+          next.result = stripPhotoUrls(next.result);
+        }
         return next as (typeof m.parts)[number];
       });
 
@@ -179,8 +199,8 @@ export async function POST(req: Request) {
       description:
         "Search for places, restaurants, attractions, or points of interest using Google Places.",
       inputSchema: z.object({
-        query: z.string().describe("Search query"),
-        location: z.string().optional().describe("Location bias (city name or lat,lng)"),
+        query: z.string().describe("Search query — ALWAYS include the country or region to disambiguate (e.g. 'restaurants in Milos, Greece' not 'restaurants in Milos')"),
+        location: z.string().optional().describe("Location bias (city name or lat,lng) — ALWAYS provide this for destination-specific searches to avoid cross-continent false matches"),
         type: z.string().optional().describe("Place type filter (restaurant, tourist_attraction, etc.)"),
       }),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -328,7 +348,7 @@ export async function POST(req: Request) {
   return result.toUIMessageStreamResponse();
 }
 
-function summarizeTrip(trip: {
+interface SummarizableTrip {
   state: {
     destination: string;
     startDate: string;
@@ -336,27 +356,61 @@ function summarizeTrip(trip: {
     travelers: number;
     style: string;
     budget: string;
-    flights: unknown[];
-    cities: unknown[];
-    hotels: unknown[];
-    days: unknown[];
+    flights: { airline: string; origin: string; destination: string; departureTime: string; price?: number }[];
+    cities: { name: string; country: string; days: number; startDate?: string; endDate?: string }[];
+    hotels: { name: string; cityId: string; pricePerNight?: number; checkIn?: string; checkOut?: string }[];
+    days: { date: string; cityId: string; daySummary?: string; activities: { title: string; type: string }[] }[];
   };
   phase: string;
-}): string {
+}
+
+function summarizeTrip(trip: SummarizableTrip): string {
   const s = trip.state;
   const parts: string[] = [];
+
   if (s.destination) parts.push(`Destination: ${s.destination}`);
   if (s.startDate && s.endDate) parts.push(`Dates: ${s.startDate} to ${s.endDate}`);
   if (s.travelers) parts.push(`Travelers: ${s.travelers}`);
   if (s.style) parts.push(`Style: ${s.style}`);
   if (s.budget) parts.push(`Budget: ${s.budget}`);
-  if (s.flights.length) parts.push(`Flights: ${s.flights.length} booked`);
-  if (s.cities.length)
-    parts.push(
-      `Cities: ${(s.cities as { name: string }[]).map((c) => c.name).join(" → ")}`
-    );
-  if (s.hotels.length) parts.push(`Hotels: ${s.hotels.length} booked`);
-  if (s.days.length) parts.push(`Day plans: ${s.days.length} days planned`);
+
+  if (s.flights.length) {
+    parts.push("Flights:");
+    for (const f of s.flights) {
+      const price = f.price ? ` $${f.price}` : "";
+      parts.push(`  - ${f.airline} ${f.origin}→${f.destination} ${f.departureTime.slice(0, 10)}${price}`);
+    }
+  }
+
+  if (s.cities.length) {
+    const cityStrs = s.cities.map((c) => {
+      const dates = c.startDate && c.endDate ? ` (${c.startDate.slice(5)}–${c.endDate.slice(5)})` : ` (${c.days}d)`;
+      return `${c.name}${dates}`;
+    });
+    parts.push(`Cities: ${cityStrs.join(" → ")}`);
+  }
+
+  if (s.hotels.length) {
+    parts.push("Hotels:");
+    for (const h of s.hotels) {
+      const price = h.pricePerNight ? ` $${h.pricePerNight}/night` : "";
+      const dates = h.checkIn && h.checkOut ? ` ${h.checkIn.slice(5)}–${h.checkOut.slice(5)}` : "";
+      parts.push(`  - ${h.name}${price}${dates}`);
+    }
+  }
+
+  if (s.days.length) {
+    parts.push("Day plans:");
+    for (const d of s.days) {
+      const summary = d.daySummary
+        || d.activities.map((a) => a.title).join(", ")
+        || "No activities";
+      const isFree = d.activities.length === 0
+        || (d.activities.length === 1 && d.activities[0].type === "free_time");
+      parts.push(`  - ${d.date.slice(5)}: ${isFree ? "FREE DAY" : summary}`);
+    }
+  }
+
   parts.push(`Current phase: ${trip.phase}`);
   return parts.join("\n");
 }

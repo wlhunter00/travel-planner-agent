@@ -24,6 +24,7 @@
 - [ ] 20 `20-multi-city-open-jaw-asia.json` — Multi-City Open-Jaw Asia (open-jaw, cross-country transit)
 - [ ] 21 `21-full-deep-portugal.json` — Full Deep Portugal (all 7 phases in depth, 8 turns, anniversary trip)
 - [ ] 22 `22-contrarian-user.json` — Contrarian User (rejects recommendations, pushes back, forces pivots, 6 turns)
+- [x] 23 `23-group-greek-islands.json` — Group Greek Islands Reunion (explicit flight skip, 10-person multi-gen group, mid-plan pivots, pushback, dietary/accessibility, 7 turns)
 
 ## Run Log
 
@@ -117,6 +118,48 @@
 - **Fixes applied**: `serpapi-hotels.ts` + `vacation-rentals.ts` (empty-result `note`); `peek.ts` (`search_regions` error wrap); `google-maps.ts` + `src/app/api/chat/route.ts` (`compute_routes` batch, removed `compute_route`); `tool-meta.ts`; `agent.ts` (batch routing guidance); `test-tools.mts`
 - **Quality notes**: Turn 1 fast (~42s, 2 steps, no lodging APIs). Turn 2 flights-only batch aligned with hybrid gate. Lodging `note` fields consumed; agent pivoted to named hotels via Places. Batch routing reduced tool churn vs. many `compute_route` calls. Full pipeline completed with opinionated picks.
 - **Cost note**: 5 turns, ~7.1 min wall time
+
+### 23 — Group Greek Islands Reunion
+- **Status**: PASS with notes
+- **Date**: 2026-04-13
+- **Turns**: 7/7 completed
+- **Total time**: ~1011s (~16.8 min)
+- **Tools used**: update_trip (x many), update_preferences (x5), web_search (x many), search_vacation_rentals (x3), search_hotels (x3), search_airbnb (x2), deep_research (x2), search_tours (x7), search_places (x many), get_place_details (x many), compute_routes (x4), push_to_wanderlog (x2 — both failed)
+- **Bugs found**: `push_to_wanderlog` returned `{"success":false,"error":"No trip loaded"}` both times in Turn 7. The tool was called correctly but no trip was loaded in the export context. Not a crash but the user's explicit Wanderlog request went unfulfilled.
+- **Improvements found**:
+  1. **Wanderlog export broken**: `push_to_wanderlog` failed twice with "No trip loaded". The agent acknowledged the failure in its response text but did not attempt `save_trip_summary` as a fallback. The tool or its integration needs investigation.
+  2. **Turn 4 day plans were too packed despite user asking for 2 free days**: The user had to push back in Turn 5 to get genuinely free days. The agent should respect "free day" requests on the first attempt. System prompt could reinforce: "when user requests N free days, mark those days as BLANK in the plan with zero activities."
+  3. **Turn 1 searched `search_vacation_rentals` prematurely**: The user hadn't asked about accommodation yet. This was a wasted tool call in the big-picture phase. The agent should wait for the hotels phase.
+  4. **Phase labeling inconsistency**: Turn 3 labels itself "Phase 4 — Hotels" but it's actually the 3rd turn. Phase numbers should match the agent's internal phase system, not turn count.
+  5. **No `save_trip_summary` called at any point**: Even without Wanderlog, the agent should call `save_trip_summary` during review phase for persistence.
+  6. **Turn 6 `search_places` returned NYC restaurant "estiatorio Milos"**: A search for Milos restaurants returned the famous NYC restaurant. The agent correctly ignored it in its response, but this suggests the search query could be more specific (e.g., include "Greece" or coordinates).
+  7. **Turn 5 had 0ch reasoning**: After pushback, the agent jumped straight to tool calls without visible reasoning. This is fine functionally but suggests the model may not be reflecting deeply on the criticism.
+- **Fixes applied**: none (first run)
+- **Quality notes**: Excellent overall. The agent respected the "no flights" instruction perfectly across all 7 turns — zero flight searches. Accessibility awareness was consistent (Lycabettus funicular, Adamas base over Plaka, drive-up Santorini). The Crete-to-Milos swap and 14-to-12-day adjustment were handled cleanly. Restaurant recommendations were strong with real ratings, hours, and walking distances. The anniversary dinner pick (Astakas in Klima) was well-reasoned. The agent was genuinely opinionated ("I'd pick this because...") rather than listing options generically. Turn pacing was acceptable (72s–172s range). The pushback recovery in Turn 5 was fast and correct. Ferry/logistics research in Turn 7 was thorough with real 2026 sources.
+- **Cost note**: 7 turns, ~16.8 min wall time — moderate-to-high for complexity
+
+### 23 — Group Greek Islands Reunion (re-run after fixes)
+- **Status**: PASS with notes
+- **Date**: 2026-04-13
+- **Turns**: 7/7 completed
+- **Total time**: ~886s (~14.8 min)
+- **Tools used**: update_trip (x many), update_preferences (x many), web_search (x many), search_vacation_rentals, search_hotels, search_airbnb, deep_research (x2), search_tours, search_places (x many — all returned empty), compute_routes, save_trip_summary (x1 — SUCCESS), push_to_wanderlog (x1 — failed)
+- **Bugs found**: `push_to_wanderlog` still fails with "No trip loaded" (pre-existing, not in scope). `search_places` returned empty results for all calls — the `locationRestriction` change (from `locationBias`) may be too strict or geocoding is returning off-center coordinates. Agent fell back to `web_search` successfully.
+- **Improvements verified (from prior run)**:
+  1. **No phase announcements** — FIXED. No phase names/numbers in user-facing text across all 7 turns. Internal `update_trip` still uses phase correctly.
+  2. **No flight searches** — Still PASS. Zero flight tool calls across all 7 turns.
+  3. **Free days in Turn 4** — IMPROVED. Agent included "2 true blank beach days" in text and encoded `"plan":"BLANK"` for Oct 18 and Oct 20 in the structured data. The scripted Turn 5 pushback still fires (static message), but the agent did attempt to honor the request on first pass.
+  4. **Pushback reasoning (Turn 5)** — FIXED. Response opens with "You're right on all three points" followed by a detailed "I got this wrong because" section with 3 bullet points, THEN delivers corrected plan. Major improvement over prior run's 0ch reasoning.
+  5. **save_trip_summary** — FIXED. Called in Turn 7, returned `{"success":true}`.
+  6. **search_places Milos/NYC** — FIXED (no NYC false matches) but regressed (all search_places calls returned empty). The `locationRestriction` prevents cross-continent results but may be too strict. Agent compensated via `web_search`.
+  7. **Photo URL stripping** — Code deployed; cannot verify from terminal output but implementation is correct.
+- **Remaining issues**:
+  1. **search_places returning empty for all calls**: Needs investigation — either `locationRestriction` radius (20km) is too tight, or geocoding is failing for these queries. Consider fallback: try `locationRestriction` first, if empty retry with `locationBias`.
+  2. **Pushback text emitted after tool calls in stream**: The AI SDK streams tool invocations before text output. The model planned the acknowledgment correctly but the stream order shows tools first, then text. This is a SDK behavior, not a prompt issue.
+  3. **push_to_wanderlog still broken**: Pre-existing issue, needs separate investigation.
+- **Fixes applied**: `src/lib/agent.ts` (5 system prompt changes), `src/app/api/chat/route.ts` (photo URL stripping, enhanced summarizeTrip, search_places descriptions), `src/lib/tools/google-places.ts` (locationBias → locationRestriction)
+- **Quality notes**: Strong improvement over first run. The agent is now genuinely opinionated, transitions naturally between topics without announcing phases, acknowledges pushback before fixing, and calls save_trip_summary in review. Turn pacing improved slightly (~886s vs ~1011s). Restaurant/anniversary dinner recommendations remain strong. Logistics coverage in Turn 7 (ferries, cars, SIM cards, insurance) was thorough.
+- **Cost note**: 7 turns, ~14.8 min wall time — improved from ~16.8 min on first run
 
 <!-- After each scenario run, append an entry below using this format:
 
