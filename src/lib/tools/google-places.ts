@@ -22,6 +22,7 @@ interface PlaceDetails {
   address?: string;
   phone?: string;
   website?: string;
+  description?: string;
   rating?: number;
   reviewCount?: number;
   priceLevel?: number;
@@ -104,7 +105,7 @@ export async function getPlaceDetails(params: { placeId: string }): Promise<Plac
         headers: {
           "X-Goog-Api-Key": apiKey,
           "X-Goog-FieldMask":
-            "id,displayName,formattedAddress,nationalPhoneNumber,websiteUri,rating,userRatingCount,priceLevel,currentOpeningHours,photos,reviews,location",
+            "id,displayName,formattedAddress,nationalPhoneNumber,websiteUri,editorialSummary,rating,userRatingCount,priceLevel,currentOpeningHours,photos,reviews,location",
         },
       }
     );
@@ -118,6 +119,7 @@ export async function getPlaceDetails(params: { placeId: string }): Promise<Plac
       address: p.formattedAddress,
       phone: p.nationalPhoneNumber,
       website: p.websiteUri,
+      description: p.editorialSummary?.text,
       rating: p.rating,
       reviewCount: p.userRatingCount,
       priceLevel: p.priceLevel ? parsePriceLevel(p.priceLevel) : undefined,

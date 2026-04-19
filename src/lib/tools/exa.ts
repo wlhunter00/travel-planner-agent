@@ -1,3 +1,68 @@
+export interface UrlContent {
+  title: string;
+  url: string;
+  text: string;
+}
+
+export async function fetchUrlContent(url: string): Promise<UrlContent> {
+  const apiKey = process.env.EXA_API_KEY;
+  if (!apiKey) {
+    return { title: "", url, text: await fallbackFetchUrl(url) };
+  }
+
+  try {
+    const res = await fetch("https://api.exa.ai/contents", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+      },
+      body: JSON.stringify({
+        urls: [url],
+        text: { maxCharacters: 8000 },
+      }),
+    });
+
+    if (!res.ok) {
+      return { title: "", url, text: await fallbackFetchUrl(url) };
+    }
+
+    const data = await res.json();
+    const result = data.results?.[0];
+    if (!result?.text) {
+      return { title: "", url, text: await fallbackFetchUrl(url) };
+    }
+
+    return {
+      title: (result.title as string) || "",
+      url,
+      text: (result.text as string).trim(),
+    };
+  } catch {
+    return { title: "", url, text: await fallbackFetchUrl(url) };
+  }
+}
+
+async function fallbackFetchUrl(url: string): Promise<string> {
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": "TravelPlannerBot/1.0" },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return `[Failed to fetch URL: HTTP ${res.status}]`;
+    const html = await res.text();
+    return html
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 8000);
+  } catch {
+    return "[Failed to fetch URL content]";
+  }
+}
+
 interface WebSearchParams {
   query: string;
   numResults: number;

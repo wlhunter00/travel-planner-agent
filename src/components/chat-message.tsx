@@ -9,6 +9,7 @@ import { isReasoningUIPart, isToolUIPart, isTextUIPart } from "ai";
 import { ReasoningPart } from "@/components/reasoning-part";
 import { ToolCallPart } from "@/components/tool-call-part";
 import { CollapsedStepsSummary } from "@/components/collapsed-steps-summary";
+import { FileText } from "lucide-react";
 
 const mdComponents: Components = {
   h1: ({ children }) => (
@@ -92,8 +93,52 @@ function toolPartReactKey(part: unknown, index: number): string {
   return `tool-${index}`;
 }
 
+function isFilePart(part: UIMessage["parts"][number]): part is UIMessage["parts"][number] & {
+  type: "file";
+  url: string;
+  mediaType: string;
+  filename?: string;
+} {
+  return part.type === "file" && "url" in part;
+}
+
+function FileParts({ parts }: { parts: UIMessage["parts"] }) {
+  const fileParts = parts.filter(isFilePart);
+  if (fileParts.length === 0) return null;
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {fileParts.map((part, i) => {
+        if (part.mediaType?.startsWith("image/")) {
+          return (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={`file-${i}`}
+              src={part.url}
+              alt={part.filename || "Attached image"}
+              className="max-w-xs max-h-48 rounded-lg object-cover"
+            />
+          );
+        }
+        return (
+          <div
+            key={`file-${i}`}
+            className="inline-flex items-center gap-1.5 rounded-md border border-primary-foreground/20 bg-primary-foreground/10 px-2 py-1 text-xs"
+          >
+            <FileText className="size-3.5" />
+            <span className="truncate max-w-[150px]">
+              {part.filename || "Document"}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function partIsRenderable(part: UIMessage["parts"][number]): boolean {
   if (isTextUIPart(part)) return Boolean(part.text?.trim());
+  if (isFilePart(part)) return true;
   if (isReasoningUIPart(part)) return true;
   if (part.type === "step-start") return true;
   if (isToolUIPart(part)) return true;
@@ -116,11 +161,15 @@ export const ChatMessage = memo(function ChatMessage({
 }: ChatMessageProps) {
   if (message.role === "user") {
     const content = extractUserText(message);
-    if (!content.trim()) return null;
+    const hasFiles = message.parts.some(isFilePart);
+    if (!content.trim() && !hasFiles) return null;
     return (
       <div className="flex justify-end animate-agent-part-in">
-        <div className="max-w-[85%] rounded-2xl px-4 py-2.5 text-sm bg-primary text-primary-foreground">
-          <span className="whitespace-pre-wrap">{content}</span>
+        <div className="max-w-[85%] rounded-2xl px-4 py-2.5 text-sm bg-primary text-primary-foreground space-y-2">
+          <FileParts parts={message.parts} />
+          {content.trim() && (
+            <span className="whitespace-pre-wrap">{content}</span>
+          )}
         </div>
       </div>
     );

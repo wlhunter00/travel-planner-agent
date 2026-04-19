@@ -9,7 +9,7 @@ import { searchVacationRentals } from "@/lib/tools/vacation-rentals";
 import { searchAirbnb } from "@/lib/tools/airbnb";
 import { searchPlaces, getPlaceDetails } from "@/lib/tools/google-places";
 import { computeRoutesBatch, type RouteLegInput } from "@/lib/tools/google-maps";
-import { webSearch } from "@/lib/tools/exa";
+import { webSearch, fetchUrlContent } from "@/lib/tools/exa";
 import { searchTours } from "@/lib/tools/exa-tours";
 import { createPeekClient } from "@/lib/tools/peek";
 import { deepResearch } from "@/lib/tools/research";
@@ -18,6 +18,7 @@ import { updatePreferencesTool, saveTripSummaryTool } from "@/lib/tools/preferen
 import { pushToWanderlog } from "@/lib/tools/wanderlog/push-to-wanderlog";
 import { z } from "zod";
 import type { Tool } from "ai";
+import type { Recommendation, Phase, RecommendationCategory } from "@/lib/types";
 
 export const maxDuration = 300;
 
@@ -74,6 +75,109 @@ function sanitizeMessagesForStatelessRequest(raw: unknown[]): UIMessage[] {
   });
 }
 
+async function extractPdfTextFromDataUrl(dataUrl: string): Promise<string> {
+  try {
+    const base64 = dataUrl.split(",")[1];
+    if (!base64) return "[Could not decode PDF]";
+    const { PDFParse } = await import("pdf-parse");
+    const data = Buffer.from(base64, "base64");
+    const parser = new PDFParse({ data });
+    const result = await parser.getText();
+    return result.text;
+  } catch {
+    return "[Failed to extract PDF text]";
+  }
+}
+
+async function preprocessFilePartsInMessages(msgs: UIMessage[]): Promise<UIMessage[]> {
+  return Promise.all(
+    msgs.map(async (msg) => {
+      if (msg.role !== "user") return msg;
+      const hasPdfParts = msg.parts.some(
+        (p) => p.type === "file" && "mediaType" in p && (p as Record<string, unknown>).mediaType === "application/pdf"
+      );
+      if (!hasPdfParts) return msg;
+
+      const newParts = await Promise.all(
+        msg.parts.map(async (part) => {
+          if (part.type !== "file") return part;
+          const fp = part as Record<string, unknown>;
+          if (fp.mediaType !== "application/pdf") return part;
+          const text = await extractPdfTextFromDataUrl(fp.url as string);
+          const filename = (fp.filename as string) || "document.pdf";
+          return { type: "text" as const, text: `[Attached PDF: ${filename}]\n\n${text}` };
+        })
+      );
+      return { ...msg, parts: newParts } as UIMessage;
+    })
+  );
+}
+
+const PHASE_CATEGORY_MAP: Record<Phase, RecommendationCategory[] | "all"> = {
+  big_picture: "all",
+  flights: [],
+  cities: "all",
+  hotels: ["hotel", "neighborhood"],
+  day_plans: ["attraction", "activity", "neighborhood"],
+  restaurants: ["restaurant"],
+  review: "all",
+};
+
+function formatRecommendations(recs: Recommendation[], phase?: Phase): string {
+  const readyRecs = recs.filter((r) => r.status === "ready" && r.extractedItems.length > 0);
+  if (readyRecs.length === 0) return "";
+
+  const allItems = readyRecs.flatMap((r) =>
+    r.extractedItems.map((item) => ({ ...item, recommender: r.recommender }))
+  );
+
+  const mapping = phase ? PHASE_CATEGORY_MAP[phase] : "all";
+  const relevantCategories: RecommendationCategory[] =
+    mapping === "all"
+      ? ["restaurant", "hotel", "attraction", "activity", "neighborhood", "general"]
+      : (mapping as RecommendationCategory[]);
+
+  const relevant = relevantCategories.length > 0
+    ? allItems.filter((i) => relevantCategories.includes(i.category))
+    : [];
+  const other = allItems.filter((i) => !relevantCategories.includes(i.category));
+
+  const lines: string[] = [];
+
+  if (relevant.length > 0) {
+    const byCategory = new Map<string, typeof relevant>();
+    for (const item of relevant) {
+      const list = byCategory.get(item.category) || [];
+      list.push(item);
+      byCategory.set(item.category, list);
+    }
+    for (const [cat, items] of byCategory) {
+      lines.push(`${cat.charAt(0).toUpperCase() + cat.slice(1)}s:`);
+      for (const item of items) {
+        let line = `- ${item.name}`;
+        if (item.location) line += ` (${item.location})`;
+        if (item.recommender) line += ` -- from ${item.recommender}`;
+        if (item.notes) line += `: "${item.notes}"`;
+        lines.push(line);
+      }
+    }
+  }
+
+  if (other.length > 0) {
+    const counts = new Map<string, number>();
+    for (const item of other) {
+      counts.set(item.category, (counts.get(item.category) || 0) + 1);
+    }
+    const parts: string[] = [];
+    for (const [cat, count] of counts) {
+      parts.push(`${count} ${cat} recommendation${count > 1 ? "s" : ""}`);
+    }
+    lines.push(`\nOther recommendations available (use get_recommendations to view): ${parts.join(", ")}`);
+  }
+
+  return lines.join("\n");
+}
+
 export async function POST(req: Request) {
   const { messages: rawMessages, tripId } = await req.json();
   const messages = sanitizeMessagesForStatelessRequest(rawMessages);
@@ -81,10 +185,15 @@ export async function POST(req: Request) {
   const trip = tripId ? await getTrip(tripId) : null;
   const preferences = await getPreferences();
 
+  const recsText = trip?.recommendations?.length
+    ? formatRecommendations(trip.recommendations, trip.phase as Phase | undefined)
+    : undefined;
+
   const systemPrompt = buildSystemPrompt({
     phase: trip?.phase,
     tripSummary: trip ? summarizeTrip(trip) : undefined,
     preferences: preferences ? formatPreferences(preferences) : undefined,
+    recommendations: recsText || undefined,
     isResuming: trip?.chatHistory && trip.chatHistory.length > 0,
     todayUtc: new Date().toISOString().slice(0, 10),
   });
@@ -330,11 +439,51 @@ export async function POST(req: Request) {
         return pushToWanderlog(trip.state);
       },
     },
+
+    get_recommendations: {
+      description:
+        "Look up friend/personal recommendations by category. Use when you want to check what was recommended for a category not shown in your current context, or to get full details on all recommendations.",
+      inputSchema: z.object({
+        category: z
+          .enum(["restaurant", "hotel", "attraction", "activity", "neighborhood", "all"])
+          .optional()
+          .default("all")
+          .describe("Filter by category, or 'all' for everything"),
+      }),
+      execute: async ({ category }: { category?: string }) => {
+        const recs = trip?.recommendations || [];
+        const readyRecs = recs.filter((r: Recommendation) => r.status === "ready");
+        if (readyRecs.length === 0)
+          return { items: [], message: "No recommendations have been added yet." };
+        const allItems = readyRecs.flatMap((r: Recommendation) =>
+          r.extractedItems.map((item) => ({
+            ...item,
+            recommender: r.recommender,
+            source: r.rawInput,
+          }))
+        );
+        const filtered =
+          !category || category === "all"
+            ? allItems
+            : allItems.filter((i) => i.category === category);
+        return { count: filtered.length, items: filtered };
+      },
+    },
+
+    fetch_url: {
+      description:
+        "Fetch and extract the main content from a specific URL. Use when the user shares a link and you need to understand what it contains (restaurant page, blog post, hotel listing, etc.).",
+      inputSchema: z.object({
+        url: z.string().describe("The URL to fetch"),
+      }),
+      execute: async ({ url }: { url: string }) => fetchUrlContent(url),
+    },
   };
 
   const allTools = { ...tools, ...peek.tools };
 
-  const modelMessages = await convertToModelMessages(messages);
+  const preprocessed = await preprocessFilePartsInMessages(messages);
+  const modelMessages = await convertToModelMessages(preprocessed);
 
   const result = streamText({
     model: openai("gpt-5.4"),

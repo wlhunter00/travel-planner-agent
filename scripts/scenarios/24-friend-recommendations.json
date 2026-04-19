@@ -1,0 +1,29 @@
+{
+  "messages": [
+    "I'm planning a week in Lisbon and Porto, Portugal for late September 2026. My friend Sarah sent me a bunch of recommendations: she says Pasteis de Belem is a must for pasteis de nata, Time Out Market for a casual lunch, and Hotel Negresco in the Alfama neighborhood was her favorite stay. My buddy Jake also says to check out the Sintra day trip and LX Factory for shopping.",
+    "We're flying from JFK. Budget is moderate, maybe $200/night. Can you look at what my friends suggested and compare with what you find? I trust your judgment over theirs but want to factor it in.",
+    "Great. Lock in flights and hotels. For hotels, how does Sarah's pick compare to what you found?"
+  ],
+  "setup": {
+    "recommendations": [
+      {
+        "type": "text",
+        "content": "Pasteis de Belem - best pasteis de nata, go early to avoid lines. Time Out Market for casual lunch with lots of options. Hotel Negresco in Alfama was amazing, great views. Sintra day trip is a must, the castles are unreal. LX Factory for shopping and cool vibes.",
+        "recommender": "Sarah"
+      },
+      {
+        "type": "text",
+        "content": "Check out Cervejaria Ramiro for seafood in Lisbon, it's incredible. Porto wine cellars tour on the south bank.",
+        "recommender": "Jake"
+      }
+    ]
+  },
+  "expect": {
+    "destination": "Portugal",
+    "datesSet": true,
+    "phaseAtLeast": "hotels",
+    "minFlights": 1,
+    "updateTripCalled": true,
+    "recommendationsUsed": true
+  }
+}

@@ -4,12 +4,14 @@ import {
   Building2,
   Globe,
   Home,
+  Link,
   MapPin,
   Pencil,
   Plane,
   Route,
   Save,
   Settings2,
+  Sparkles,
   Ticket,
   Wrench,
   ExternalLink,
@@ -341,6 +343,44 @@ const WANDERLOG_META: ToolMeta = {
   },
 };
 
+const GET_RECS_META: ToolMeta = {
+  actionLabel: "Checking recommendations",
+  Icon: Sparkles,
+  summarizeInput: (input) => {
+    const o = asRecord(input);
+    const cat = str(o?.category);
+    return cat && cat !== "all" ? `${cat}s` : "All categories";
+  },
+  summarizeOutput: (output) => {
+    const o = asRecord(output);
+    if (!o) return "Done";
+    const n = countArray(o, "items");
+    if (n !== null) return n === 0 ? "No recommendations" : `${n} recommendation${n === 1 ? "" : "s"}`;
+    return str(o.message) || "Done";
+  },
+};
+
+const FETCH_URL_META: ToolMeta = {
+  actionLabel: "Fetching URL",
+  Icon: Link,
+  summarizeInput: (input) => {
+    const o = asRecord(input);
+    const url = str(o?.url);
+    if (!url) return "";
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return url.length > 50 ? `${url.slice(0, 47)}…` : url;
+    }
+  },
+  summarizeOutput: (output) => {
+    const o = asRecord(output);
+    if (!o) return "Fetched";
+    const title = str(o.title);
+    return title || "Content fetched";
+  },
+};
+
 const TOOL_REGISTRY: Record<string, ToolMeta> = {
   search_flights: flightsMeta("Searching flights"),
   search_multi_city_flights: multiCityMeta(),
@@ -357,6 +397,8 @@ const TOOL_REGISTRY: Record<string, ToolMeta> = {
   update_preferences: PREFS_META,
   save_trip_summary: SAVE_SUMMARY_META,
   push_to_wanderlog: WANDERLOG_META,
+  get_recommendations: GET_RECS_META,
+  fetch_url: FETCH_URL_META,
 };
 
 /** Peek MCP tools are dynamic; names often include `peek` or tool-specific strings. */

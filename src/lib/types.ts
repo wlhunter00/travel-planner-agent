@@ -110,6 +110,47 @@ export interface DayPlan {
   daySummary?: string;
 }
 
+export type RecommendationCategory =
+  | "restaurant"
+  | "hotel"
+  | "attraction"
+  | "activity"
+  | "neighborhood"
+  | "general";
+
+export interface ExtractedItem {
+  name: string;
+  category: RecommendationCategory;
+  location?: string;
+  notes?: string;
+  sourceUrl?: string;
+  priceRange?: string;
+}
+
+export interface Recommendation {
+  id: string;
+  type: "url" | "text" | "file";
+  rawInput: string;
+  recommender?: string;
+  status: "pending" | "processing" | "ready" | "error";
+  error?: string;
+  extractedItems: ExtractedItem[];
+  addedAt: string;
+}
+
+export interface SkeletonDay {
+  date: string;
+  city: string;
+  plan: string;
+}
+
+export interface ConfirmedHotel {
+  name: string;
+  area: string;
+  booking?: string;
+  backupBooking?: string;
+}
+
 export interface TripState {
   destination: string;
   startDate: string;
@@ -121,6 +162,24 @@ export interface TripState {
   cities: CityStop[];
   hotels: Hotel[];
   days: DayPlan[];
+  notes?: string;
+  route?: {
+    order: string[];
+    transfer?: string;
+    timings?: Record<string, string>;
+  };
+  research?: Record<string, unknown>;
+  draftOptions?: Array<Record<string, unknown>>;
+  confirmedChoices?: Record<string, unknown>;
+  excursionCandidates?: Record<string, string[]>;
+  itinerarySkeleton?: SkeletonDay[];
+  lodging?: {
+    confirmedHotels?: Record<string, ConfirmedHotel>;
+    confirmedNeighborhoods?: Record<string, string>;
+  };
+  transferPreferences?: Record<string, string>;
+  hotelResearch?: Record<string, unknown>;
+  [key: string]: unknown;
 }
 
 export interface Trip {
@@ -132,6 +191,7 @@ export interface Trip {
   updatedAt: string;
   state: TripState;
   chatHistory: ChatMessage[];
+  recommendations: Recommendation[];
   destination: string;
   startDate: string;
   endDate: string;
@@ -183,6 +243,7 @@ export function createNewTrip(id: string): Trip {
     updatedAt: now,
     state: createEmptyTripState(),
     chatHistory: [],
+    recommendations: [],
     destination: "",
     startDate: "",
     endDate: "",

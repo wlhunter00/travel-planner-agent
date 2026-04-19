@@ -63,7 +63,9 @@ export async function listTrips(): Promise<TripIndex[]> {
 export async function getTrip(id: string): Promise<Trip | null> {
   try {
     const data = await fs.readFile(tripPath(id), "utf-8");
-    return JSON.parse(data);
+    const trip = JSON.parse(data);
+    if (!trip.recommendations) trip.recommendations = [];
+    return trip;
   } catch {
     return null;
   }

@@ -1,0 +1,14 @@
+{
+  "messages": [
+    "I want to plan a long weekend in Barcelona, Spain. Flying from LAX, early October 2026. Couple's trip.",
+    "My friend sent me this restaurant link, can you check it out and tell me if it's worth adding? https://www.tripadvisor.com/Restaurant_Review-g187497-d1060778-Reviews-Cal_Pep-Barcelona_Catalonia.html",
+    "Nice, let's lock in flights and a boutique hotel in the Gothic Quarter. Budget around $250/night."
+  ],
+  "expect": {
+    "destination": "Barcelona",
+    "datesSet": true,
+    "phaseAtLeast": "flights",
+    "updateTripCalled": true,
+    "fetchUrlUsed": true
+  }
+}

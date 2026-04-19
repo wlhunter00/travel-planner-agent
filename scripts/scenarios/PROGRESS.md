@@ -25,6 +25,8 @@
 - [ ] 21 `21-full-deep-portugal.json` — Full Deep Portugal (all 7 phases in depth, 8 turns, anniversary trip)
 - [ ] 22 `22-contrarian-user.json` — Contrarian User (rejects recommendations, pushes back, forces pivots, 6 turns)
 - [x] 23 `23-group-greek-islands.json` — Group Greek Islands Reunion (explicit flight skip, 10-person multi-gen group, mid-plan pivots, pushback, dietary/accessibility, 7 turns)
+- [ ] 24 `24-friend-recommendations.json` — Friend Recommendations (pre-seeded recs via setup block, agent references friend suggestions, get_recommendations tool, 3 turns)
+- [ ] 25 `25-multimodal-url-sharing.json` — Multimodal URL Sharing (user shares URL in chat, agent uses fetch_url tool, 3 turns)
 
 ## Run Log
 

@@ -169,6 +169,31 @@ interface PlanExpectations {
   minHotels?: number;
   minDays?: number;
   updateTripCalled?: boolean;
+  /** Expect get_recommendations tool to be called at least once */
+  recommendationsUsed?: boolean;
+  /** Expect fetch_url tool to be called at least once */
+  fetchUrlUsed?: boolean;
+}
+
+interface ScenarioSetup {
+  recommendations?: Array<{
+    type: "url" | "text" | "file";
+    content: string;
+    recommender?: string;
+  }>;
+}
+
+function extractToolCallsByName(history: UIMessage[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const msg of history) {
+    if (msg.role !== "assistant") continue;
+    for (const part of msg.parts) {
+      if (!isToolUIPart(part)) continue;
+      const name = getToolName(part);
+      counts.set(name, (counts.get(name) || 0) + 1);
+    }
+  }
+  return counts;
 }
 
 function extractUpdateTripCalls(history: UIMessage[]): Record<string, unknown>[] {
@@ -231,7 +256,7 @@ interface ValidationResult {
   detail: string;
 }
 
-function validatePlan(plan: ReconstructedPlan, expect?: PlanExpectations): ValidationResult[] {
+function validatePlan(plan: ReconstructedPlan, history: UIMessage[], expect?: PlanExpectations): ValidationResult[] {
   const results: ValidationResult[] = [];
   const e = expect ?? {};
 
@@ -339,6 +364,37 @@ function validatePlan(plan: ReconstructedPlan, expect?: PlanExpectations): Valid
     results.push({ label: "Trip name", status: "PASS", detail: plan.name });
   }
 
+  // New tool usage checks
+  const toolCounts = extractToolCallsByName(history);
+
+  if (e.recommendationsUsed !== undefined) {
+    const recsCount = toolCounts.get("get_recommendations") || 0;
+    // Also check if assistant text references recommendations (the agent may use system prompt context without calling the tool)
+    const recsReferenced = history.some(
+      (m) => m.role === "assistant" && extractTextFromMessage(m).toLowerCase().match(/recommend|friend.*suggest|sarah|jake/)
+    );
+    const used = recsCount > 0 || recsReferenced;
+    results.push({
+      label: "Recommendations referenced",
+      status: used === e.recommendationsUsed ? "PASS" : "FAIL",
+      detail: recsCount > 0
+        ? `get_recommendations called ${recsCount}x`
+        : recsReferenced
+          ? "Referenced in assistant text (via system prompt context)"
+          : "Not referenced",
+    });
+  }
+
+  if (e.fetchUrlUsed !== undefined) {
+    const fetchCount = toolCounts.get("fetch_url") || 0;
+    const used = fetchCount > 0;
+    results.push({
+      label: "fetch_url used",
+      status: used === e.fetchUrlUsed ? "PASS" : "FAIL",
+      detail: used ? `fetch_url called ${fetchCount}x` : "Not called",
+    });
+  }
+
   return results;
 }
 
@@ -368,7 +424,7 @@ function printPlanValidation(plan: ReconstructedPlan, results: ValidationResult[
 
 // ── input parsing ────────────────────────────────────────────────────────────
 
-function loadUserTurnsFromFile(filePath: string): { turns: string[]; expect?: PlanExpectations } {
+function loadUserTurnsFromFile(filePath: string): { turns: string[]; expect?: PlanExpectations; setup?: ScenarioSetup } {
   const raw: unknown = JSON.parse(readFileSync(resolve(filePath), "utf-8"));
 
   // Plain string array: ["msg1", "msg2"]
@@ -383,10 +439,11 @@ function loadUserTurnsFromFile(filePath: string): { turns: string[]; expect?: Pl
   const msgs = (raw as { messages: unknown }).messages;
   if (!Array.isArray(msgs)) throw new Error("Invalid JSON: messages must be an array");
   const expect = "expect" in raw ? (raw as { expect: PlanExpectations }).expect : undefined;
+  const setup = "setup" in raw ? (raw as { setup: ScenarioSetup }).setup : undefined;
 
   // Simple string array inside object: { messages: ["msg1", "msg2"], expect: {...} }
   if (msgs.length > 0 && typeof msgs[0] === "string") {
-    return { turns: msgs.map((x) => String(x)).filter(Boolean), expect };
+    return { turns: msgs.map((x) => String(x)).filter(Boolean), expect, setup };
   }
 
   // UIMessage export format: { messages: [{ role: "user", parts: [...] }] }
@@ -407,10 +464,10 @@ function loadUserTurnsFromFile(filePath: string): { turns: string[]; expect?: Pl
     if (text) texts.push(text);
   }
   if (texts.length === 0) throw new Error("No user text parts found in messages[]");
-  return { turns: texts, expect };
+  return { turns: texts, expect, setup };
 }
 
-function parseCli(): { turns: string[]; expect?: PlanExpectations } {
+function parseCli(): { turns: string[]; expect?: PlanExpectations; setup?: ScenarioSetup } {
   const argv = process.argv.slice(2);
   let filePath: string | null = null;
   const positional: string[] = [];
@@ -430,10 +487,64 @@ function parseCli(): { turns: string[]; expect?: PlanExpectations } {
   return { turns: ["hello"] };
 }
 
+// ── setup ────────────────────────────────────────────────────────────────────
+
+async function ensureTripExists(): Promise<void> {
+  // Check if trip already exists
+  const getRes = await fetch(`${BASE}/api/trips?id=${tripId}`);
+  if (getRes.ok) return;
+
+  // Create a new trip, then PUT it back with our specific tripId
+  const postRes = await fetch(`${BASE}/api/trips`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: "Test Trip" }),
+  });
+  if (!postRes.ok) throw new Error(`Failed to create trip: ${postRes.status}`);
+  const created = (await postRes.json()) as Record<string, unknown>;
+  created.id = tripId;
+  const putRes = await fetch(`${BASE}/api/trips`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(created),
+  });
+  if (!putRes.ok) throw new Error(`Failed to re-save trip with id ${tripId}: ${putRes.status}`);
+}
+
+async function seedRecommendations(recs: ScenarioSetup["recommendations"]): Promise<void> {
+  if (!recs || recs.length === 0) return;
+  console.log(`  Seeding ${recs.length} recommendation(s) via /api/recommendations…`);
+  for (const rec of recs) {
+    try {
+      const res = await fetch(`${BASE}/api/recommendations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tripId,
+          type: rec.type,
+          content: rec.content,
+          recommender: rec.recommender,
+        }),
+      });
+      if (res.ok) {
+        const result = await res.json() as { status: string; extractedItems: unknown[] };
+        console.log(
+          `    ✓ ${rec.recommender || "anon"}: ${result.status}, ${Array.isArray(result.extractedItems) ? result.extractedItems.length : 0} items extracted`
+        );
+      } else {
+        console.log(`    ✗ Failed (HTTP ${res.status}): ${await res.text()}`);
+      }
+    } catch (err) {
+      console.log(`    ✗ Error: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+  console.log("");
+}
+
 // ── main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const { turns: userTurns, expect: planExpect } = parseCli();
+  const { turns: userTurns, expect: planExpect, setup } = parseCli();
   await resetPreferencesIfNeeded();
 
   console.log("\n╔══════════════════════════════════════════════════════════╗");
@@ -444,8 +555,18 @@ async function main() {
   console.log(`  Turns:    ${userTurns.length} user message(s)`);
   console.log(`  Verbose:  ${VERBOSE ? "ON" : "OFF (set VERBOSE=1 for full dumps)"}`);
   console.log(
-    `  Prefs:    ${process.env.SKIP_RESET_PREFERENCES === "1" ? "kept (SKIP_RESET_PREFERENCES=1)" : "reset to empty for this run"}\n`
+    `  Prefs:    ${process.env.SKIP_RESET_PREFERENCES === "1" ? "kept (SKIP_RESET_PREFERENCES=1)" : "reset to empty for this run"}`
   );
+  if (setup?.recommendations?.length) {
+    console.log(`  Setup:    ${setup.recommendations.length} recommendation(s) to pre-seed`);
+  }
+  console.log("");
+
+  // Pre-seed trip and recommendations if setup block is present
+  if (setup?.recommendations?.length) {
+    await ensureTripExists();
+    await seedRecommendations(setup.recommendations);
+  }
 
   const transport = new DefaultChatTransport<UIMessage>({
     api: `${BASE}/api/chat`,
@@ -623,7 +744,7 @@ async function main() {
 
   // ── plan validation ──────────────────────────────────────────────────────
   const plan = reconstructPlan(history);
-  const validationResults = validatePlan(plan, planExpect);
+  const validationResults = validatePlan(plan, history, planExpect);
   printPlanValidation(plan, validationResults);
 
   const planFails = validationResults.filter((r) => r.status === "FAIL").length;

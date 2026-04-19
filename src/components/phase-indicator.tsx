@@ -28,7 +28,7 @@ export function PhaseIndicator({ currentPhase }: PhaseIndicatorProps) {
               {isComplete ? <Check className="size-3" /> : i + 1}
             </div>
             <span
-              className={`text-xs truncate hidden lg:inline transition-colors ${
+              className={`text-xs leading-none truncate hidden lg:inline transition-colors ${
                 isActive ? "font-semibold text-foreground" : "text-muted-foreground/60"
               }`}
             >

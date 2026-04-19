@@ -133,6 +133,12 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
     }
   }, [messages, updateTripState, setPhase, setTripMeta]);
 
+  const didHydrateRef = useRef(false);
+
+  useEffect(() => {
+    didHydrateRef.current = false;
+  }, [trip?.id]);
+
   useEffect(() => {
     if (trip?.chatHistory && trip.chatHistory.length > 0 && messages.length === 0) {
       setMessages(
@@ -145,17 +151,18 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
               : [{ type: "text" as const, text: m.content }],
         }))
       );
+      didHydrateRef.current = true;
     }
   // Intentionally hydrate once per trip id when local messages are empty (avoid clobbering live chat).
   // eslint-disable-next-line react-hooks/exhaustive-deps -- trip.chatHistory/setMessages omitted; see above
   }, [trip?.id]);
 
   useEffect(() => {
-    if (messages.length > 0) {
+    if (didHydrateRef.current && messages.length > 0) {
+      didHydrateRef.current = false;
       scrollToBottom(scrollRef);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trip?.id]);
+  }, [messages.length]);
 
   const saveChat = useCallback(async () => {
     if (!trip || messages.length === 0) return;
@@ -263,7 +270,7 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
           <p className="text-xs text-muted-foreground">Powered by GPT</p>
         </div>
         <div className="flex items-center gap-1">
-          {recCount > 0 && !recsOpen && (
+          {!recsOpen && (
             <Button
               variant="ghost"
               size="sm"
@@ -271,7 +278,9 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
               className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1"
             >
               <Sparkles className="size-3" />
-              {recCount} rec{recCount !== 1 ? "s" : ""}
+              {recCount > 0
+                ? `${recCount} rec${recCount !== 1 ? "s" : ""}`
+                : "Recs"}
             </Button>
           )}
           {messages.length > 0 && (
@@ -320,7 +329,8 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
                             Have recommendations from friends?
                           </div>
                           <p className="text-[11px] text-muted-foreground mt-1">
-                            Add URLs, notes, or PDFs and the agent will factor them in.
+                            Add URLs, notes, or PDFs — they&apos;ll appear in your trip overview
+                            and the agent will factor them in.
                           </p>
                         </button>
                         <button
