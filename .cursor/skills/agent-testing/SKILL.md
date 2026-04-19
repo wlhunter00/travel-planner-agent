@@ -15,7 +15,24 @@ Extract the filename from the backtick-wrapped span (e.g., `` `03-multi-country-
 
 **Override**: If the user said a specific number or name (e.g., "run scenario 14", "run the Colombia one"), use that instead.
 
-Read the scenario JSON file at `scripts/scenarios/<filename>` to understand what's being tested and how many turns to expect.
+Read the scenario JSON file at `scripts/scenarios/<filename>` to understand what's being tested and how many turns to expect. Scenarios can be either a plain string array or an object with `messages` and optional `expect`:
+
+```json
+{
+  "messages": ["user msg 1", "user msg 2"],
+  "expect": {
+    "destination": "Rome",
+    "datesSet": true,
+    "phaseAtLeast": "day_plans",
+    "minFlights": 1,
+    "minCities": 1,
+    "minHotels": 1,
+    "minDays": 3
+  }
+}
+```
+
+The `expect` block makes plan validation checks into hard `FAIL`s instead of soft `WARN`s. All fields are optional.
 
 Tell the user which scenario you're running and what it tests.
 
@@ -78,6 +95,8 @@ Once the run completes (look for `ALL TURNS OK` or an error/exit), read the **fu
 
 **Recommendation quality** — Was the agent opinionated ("I recommend X because...") or just listing options? Did it present 2-4 options with clear tradeoffs? Did it include real data (prices, times, ratings)? Did later turns build on earlier decisions?
 
+**Plan validation** — The test runner now reconstructs the trip plan from all `update_trip` tool calls and runs automated checks (destination set, dates set, phase progression, array field counts). Check the `PLAN VALIDATION` section in the output. Any `FAIL` results are bugs. `WARN` results (e.g. empty destination, no dates) are quality issues — the agent talked about it but never saved it to the plan. If a scenario has an `expect` block in its JSON, failures against those expectations are hard fails.
+
 **State management** — Did `update_trip` save confirmed decisions? Were phase transitions correct? Did the agent summarize progress when moving phases? Were dates/destination set early (not left blank)?
 
 **Proactive intelligence** — Did the agent volunteer useful info the user didn't ask about? (visa, booking lead times, seasonal crowds, jet lag, meal timing, transit tips, scams) For scenario 13: did it push back? For scenario 09: did it proactively address accessibility? For scenario 18: did it prioritize speed?
@@ -127,6 +146,7 @@ In `scripts/scenarios/PROGRESS.md`:
 - **Turns**: X/Y completed
 - **Total time**: Xs
 - **Tools used**: tool1, tool2, ...
+- **Plan validation**: X pass, Y warn, Z fail (list any FAILs)
 - **Bugs found**: description or "none"
 - **Improvements found**: numbered list of quality issues identified
 - **Fixes applied**: files changed or "none"

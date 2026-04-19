@@ -142,39 +142,275 @@ function dumpParts(msg: UIMessage, t0: number) {
   console.log("  ── end parts ──\n");
 }
 
-// ── input parsing ────────────────────────────────────────────────────────────
+// ── plan reconstruction & validation ─────────────────────────────────────────
 
-function loadUserTurnsFromFile(filePath: string): string[] {
-  const raw: unknown = JSON.parse(readFileSync(resolve(filePath), "utf-8"));
-  if (Array.isArray(raw)) {
-    return raw.map((x) => String(x)).filter(Boolean);
-  }
-  if (typeof raw === "object" && raw !== null && "messages" in raw) {
-    const msgs = (raw as { messages: unknown }).messages;
-    if (!Array.isArray(msgs)) throw new Error("Invalid JSON: messages must be an array");
-    const texts: string[] = [];
-    for (const m of msgs) {
-      if (typeof m !== "object" || m === null) continue;
-      const role = (m as { role?: string }).role;
-      const parts = (m as { parts?: unknown }).parts;
-      if (role !== "user" || !Array.isArray(parts)) continue;
-      const text = parts
-        .filter(
-          (p): p is { type: string; text: string } =>
-            typeof p === "object" && p !== null && "type" in p &&
-            (p as { type: string }).type === "text" && "text" in p
-        )
-        .map((p) => p.text)
-        .join("");
-      if (text) texts.push(text);
-    }
-    if (texts.length === 0) throw new Error("No user text parts found in messages[]");
-    return texts;
-  }
-  throw new Error("JSON must be string[] or { messages: [...] } (e.g. exported chat debug)");
+const PHASE_ORDER = [
+  "big_picture", "flights", "cities", "hotels", "day_plans", "restaurants", "review",
+] as const;
+
+type Phase = (typeof PHASE_ORDER)[number];
+
+interface ReconstructedPlan {
+  destination: string;
+  startDate: string;
+  endDate: string;
+  name: string;
+  phase: Phase;
+  state: Record<string, unknown>;
+  updateCount: number;
 }
 
-function parseCli(): string[] {
+interface PlanExpectations {
+  destination?: string | true;
+  datesSet?: boolean;
+  phaseAtLeast?: Phase;
+  minFlights?: number;
+  minCities?: number;
+  minHotels?: number;
+  minDays?: number;
+  updateTripCalled?: boolean;
+}
+
+function extractUpdateTripCalls(history: UIMessage[]): Record<string, unknown>[] {
+  const calls: Record<string, unknown>[] = [];
+  for (const msg of history) {
+    if (msg.role !== "assistant") continue;
+    for (const part of msg.parts) {
+      if (!isToolUIPart(part)) continue;
+      if (getToolName(part) !== "update_trip") continue;
+      const state = "state" in part ? (part as { state: string }).state : "";
+      if (state !== "result") continue;
+      const output = "output" in part ? (part as { output: unknown }).output : undefined;
+      if (output && typeof output === "object") {
+        calls.push(output as Record<string, unknown>);
+      }
+    }
+  }
+  return calls;
+}
+
+function reconstructPlan(history: UIMessage[]): ReconstructedPlan {
+  const calls = extractUpdateTripCalls(history);
+  let destination = "";
+  let startDate = "";
+  let endDate = "";
+  let name = "";
+  let phase: Phase = "big_picture";
+  let state: Record<string, unknown> = {
+    destination: "", startDate: "", endDate: "",
+    travelers: 1, style: "", budget: "",
+    flights: [], cities: [], hotels: [], days: [],
+  };
+
+  for (const args of calls) {
+    if (typeof args.destination === "string" && args.destination) destination = args.destination;
+    if (typeof args.startDate === "string" && args.startDate) startDate = args.startDate;
+    if (typeof args.endDate === "string" && args.endDate) endDate = args.endDate;
+    if (typeof args.name === "string" && args.name) name = args.name;
+    if (typeof args.phase === "string" && PHASE_ORDER.includes(args.phase as Phase)) {
+      phase = args.phase as Phase;
+    }
+    if (args.tripState) {
+      try {
+        const parsed = typeof args.tripState === "string"
+          ? JSON.parse(args.tripState)
+          : args.tripState;
+        if (typeof parsed === "object" && parsed !== null) {
+          state = { ...state, ...parsed };
+        }
+      } catch { /* ignore malformed tripState */ }
+    }
+  }
+
+  return { destination, startDate, endDate, name, phase, state, updateCount: calls.length };
+}
+
+interface ValidationResult {
+  label: string;
+  status: "PASS" | "WARN" | "FAIL";
+  detail: string;
+}
+
+function validatePlan(plan: ReconstructedPlan, expect?: PlanExpectations): ValidationResult[] {
+  const results: ValidationResult[] = [];
+  const e = expect ?? {};
+
+  if (plan.updateCount === 0) {
+    results.push({
+      label: "update_trip called",
+      status: e.updateTripCalled === false ? "PASS" : "WARN",
+      detail: "Agent never called update_trip — no plan was built",
+    });
+    return results;
+  }
+
+  results.push({
+    label: "update_trip called",
+    status: "PASS",
+    detail: `${plan.updateCount} call(s)`,
+  });
+
+  // Destination
+  if (plan.destination || (plan.state.destination && typeof plan.state.destination === "string" && plan.state.destination)) {
+    const dest = plan.destination || (plan.state.destination as string);
+    if (typeof e.destination === "string") {
+      const match = dest.toLowerCase().includes(e.destination.toLowerCase());
+      results.push({
+        label: "Destination matches expected",
+        status: match ? "PASS" : "FAIL",
+        detail: match ? dest : `Expected "${e.destination}", got "${dest}"`,
+      });
+    } else {
+      results.push({ label: "Destination set", status: "PASS", detail: dest });
+    }
+  } else {
+    results.push({
+      label: "Destination set",
+      status: e.destination ? "FAIL" : "WARN",
+      detail: "Destination is empty",
+    });
+  }
+
+  // Dates
+  const hasStart = !!(plan.startDate || plan.state.startDate);
+  const hasEnd = !!(plan.endDate || plan.state.endDate);
+  if (hasStart && hasEnd) {
+    results.push({
+      label: "Dates set",
+      status: "PASS",
+      detail: `${plan.startDate || plan.state.startDate} → ${plan.endDate || plan.state.endDate}`,
+    });
+  } else if (hasStart || hasEnd) {
+    results.push({
+      label: "Dates set",
+      status: "WARN",
+      detail: `Only ${hasStart ? "start" : "end"} date set`,
+    });
+  } else {
+    results.push({
+      label: "Dates set",
+      status: e.datesSet ? "FAIL" : "WARN",
+      detail: "No dates set",
+    });
+  }
+
+  // Phase progression
+  const phaseIdx = PHASE_ORDER.indexOf(plan.phase);
+  if (e.phaseAtLeast) {
+    const expectedIdx = PHASE_ORDER.indexOf(e.phaseAtLeast);
+    results.push({
+      label: "Phase progression",
+      status: phaseIdx >= expectedIdx ? "PASS" : "FAIL",
+      detail: `Phase: ${plan.phase} (expected at least ${e.phaseAtLeast})`,
+    });
+  } else {
+    results.push({
+      label: "Phase progression",
+      status: phaseIdx > 0 ? "PASS" : "WARN",
+      detail: `Phase: ${plan.phase}`,
+    });
+  }
+
+  // Array fields
+  const arrayChecks: { key: string; label: string; minKey: keyof PlanExpectations }[] = [
+    { key: "flights", label: "Flights", minKey: "minFlights" },
+    { key: "cities", label: "Cities", minKey: "minCities" },
+    { key: "hotels", label: "Hotels", minKey: "minHotels" },
+    { key: "days", label: "Day plans", minKey: "minDays" },
+  ];
+
+  for (const { key, label, minKey } of arrayChecks) {
+    const arr = plan.state[key];
+    const count = Array.isArray(arr) ? arr.length : 0;
+    const minExpected = e[minKey] as number | undefined;
+    if (minExpected !== undefined) {
+      results.push({
+        label,
+        status: count >= minExpected ? "PASS" : "FAIL",
+        detail: `${count} (expected >= ${minExpected})`,
+      });
+    } else if (count > 0) {
+      results.push({ label, status: "PASS", detail: `${count}` });
+    }
+  }
+
+  // Trip name
+  if (plan.name) {
+    results.push({ label: "Trip name", status: "PASS", detail: plan.name });
+  }
+
+  return results;
+}
+
+function printPlanValidation(plan: ReconstructedPlan, results: ValidationResult[]) {
+  console.log("\n╔══════════════════════════════════════════════════════════╗");
+  console.log("║  PLAN VALIDATION                                       ║");
+  console.log("╚══════════════════════════════════════════════════════════╝");
+
+  const icons: Record<string, string> = { PASS: "✅", WARN: "⚠️ ", FAIL: "❌" };
+  for (const r of results) {
+    console.log(`  ${icons[r.status]} ${r.label}: ${r.detail}`);
+  }
+
+  const fails = results.filter((r) => r.status === "FAIL").length;
+  const warns = results.filter((r) => r.status === "WARN").length;
+  const passes = results.filter((r) => r.status === "PASS").length;
+  console.log(`\n  Summary: ${passes} pass, ${warns} warn, ${fails} fail`);
+
+  if (VERBOSE && plan.updateCount > 0) {
+    console.log("\n  ── Reconstructed plan state ──");
+    const stateStr = JSON.stringify(plan.state, null, 2);
+    console.log(indent(stateStr, "  ", 60));
+    console.log("  ── end plan state ──");
+  }
+  console.log("");
+}
+
+// ── input parsing ────────────────────────────────────────────────────────────
+
+function loadUserTurnsFromFile(filePath: string): { turns: string[]; expect?: PlanExpectations } {
+  const raw: unknown = JSON.parse(readFileSync(resolve(filePath), "utf-8"));
+
+  // Plain string array: ["msg1", "msg2"]
+  if (Array.isArray(raw)) {
+    return { turns: raw.map((x) => String(x)).filter(Boolean) };
+  }
+
+  if (typeof raw !== "object" || raw === null || !("messages" in raw)) {
+    throw new Error("JSON must be string[] or { messages: [...], expect?: {...} }");
+  }
+
+  const msgs = (raw as { messages: unknown }).messages;
+  if (!Array.isArray(msgs)) throw new Error("Invalid JSON: messages must be an array");
+  const expect = "expect" in raw ? (raw as { expect: PlanExpectations }).expect : undefined;
+
+  // Simple string array inside object: { messages: ["msg1", "msg2"], expect: {...} }
+  if (msgs.length > 0 && typeof msgs[0] === "string") {
+    return { turns: msgs.map((x) => String(x)).filter(Boolean), expect };
+  }
+
+  // UIMessage export format: { messages: [{ role: "user", parts: [...] }] }
+  const texts: string[] = [];
+  for (const m of msgs) {
+    if (typeof m !== "object" || m === null) continue;
+    const role = (m as { role?: string }).role;
+    const parts = (m as { parts?: unknown }).parts;
+    if (role !== "user" || !Array.isArray(parts)) continue;
+    const text = parts
+      .filter(
+        (p): p is { type: string; text: string } =>
+          typeof p === "object" && p !== null && "type" in p &&
+          (p as { type: string }).type === "text" && "text" in p
+      )
+      .map((p) => p.text)
+      .join("");
+    if (text) texts.push(text);
+  }
+  if (texts.length === 0) throw new Error("No user text parts found in messages[]");
+  return { turns: texts, expect };
+}
+
+function parseCli(): { turns: string[]; expect?: PlanExpectations } {
   const argv = process.argv.slice(2);
   let filePath: string | null = null;
   const positional: string[] = [];
@@ -190,14 +426,14 @@ function parseCli(): string[] {
   }
 
   if (filePath) return loadUserTurnsFromFile(filePath);
-  if (positional.length > 0) return positional;
-  return ["hello"];
+  if (positional.length > 0) return { turns: positional };
+  return { turns: ["hello"] };
 }
 
 // ── main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const userTurns = parseCli();
+  const { turns: userTurns, expect: planExpect } = parseCli();
   await resetPreferencesIfNeeded();
 
   console.log("\n╔══════════════════════════════════════════════════════════╗");
@@ -385,9 +621,20 @@ async function main() {
     }
   }
 
+  // ── plan validation ──────────────────────────────────────────────────────
+  const plan = reconstructPlan(history);
+  const validationResults = validatePlan(plan, planExpect);
+  printPlanValidation(plan, validationResults);
+
+  const planFails = validationResults.filter((r) => r.status === "FAIL").length;
+
   console.log("\n╔══════════════════════════════════════════════════════════╗");
   console.log("║  ALL TURNS OK                                          ║");
   console.log("╚══════════════════════════════════════════════════════════╝\n");
+
+  if (planFails > 0) {
+    console.log(`  ⚠️  ${planFails} plan validation failure(s) — see PLAN VALIDATION above\n`);
+  }
 }
 
 main().catch((err) => {

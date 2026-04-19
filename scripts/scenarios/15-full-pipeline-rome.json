@@ -1,7 +1,17 @@
-[
-  "Plan a 5-day trip to Rome for my wife and me. Anniversary trip, mid-September 2026.",
-  "We're flying from JFK. Moderate budget, maybe $250/night. We love history and food.",
-  "Looks good. Go with your top flight and hotel recommendations. Now plan our days -- we want Colosseum, Vatican, Trastevere, and a cooking class.",
-  "Great, now add restaurants for each day. We want one splurge dinner and the rest casual trattorias.",
-  "Looks great. Give me the final review and any last warnings before we book."
-]
+{
+  "messages": [
+    "Plan a 5-day trip to Rome for my wife and me. Anniversary trip, mid-September 2026.",
+    "We're flying from JFK. Moderate budget, maybe $250/night. We love history and food.",
+    "Looks good. Go with your top flight and hotel recommendations. Now plan our days -- we want Colosseum, Vatican, Trastevere, and a cooking class.",
+    "Great, now add restaurants for each day. We want one splurge dinner and the rest casual trattorias.",
+    "Looks great. Give me the final review and any last warnings before we book."
+  ],
+  "expect": {
+    "destination": "Rome",
+    "datesSet": true,
+    "phaseAtLeast": "review",
+    "minFlights": 1,
+    "minHotels": 1,
+    "minDays": 3
+  }
+}

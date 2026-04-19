@@ -1,5 +1,12 @@
-[
-  "Family trip to Tokyo and Kyoto with 2 kids ages 5 and 8, October 2026, 10 days.",
-  "Flying from SFO, need family rooms. Budget around $300/night. Kids love anime, trains, and interactive museums.",
-  "What kid-friendly tours and experiences are available? Also need restaurants that work with picky eaters."
-]
+{
+  "messages": [
+    "Family trip to Tokyo and Kyoto with 2 kids ages 5 and 8, October 2026, 10 days.",
+    "Flying from SFO, need family rooms. Budget around $300/night. Kids love anime, trains, and interactive museums.",
+    "What kid-friendly tours and experiences are available? Also need restaurants that work with picky eaters."
+  ],
+  "expect": {
+    "destination": true,
+    "datesSet": true,
+    "minCities": 2
+  }
+}

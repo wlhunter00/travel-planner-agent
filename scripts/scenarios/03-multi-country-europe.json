@@ -1,5 +1,13 @@
-[
-  "3-week trip through Italy, Croatia, and Greece for 4 friends in July 2026. We want Rome, Amalfi Coast, Dubrovnik, Santorini, and Athens.",
-  "Flying out of Chicago. We're open to the route order but want to minimize backtracking. Mix of hotels and Airbnbs.",
-  "OK let's look at intercity options -- ferries, trains, budget airlines between cities."
-]
+{
+  "messages": [
+    "3-week trip through Italy, Croatia, and Greece for 4 friends in July 2026. We want Rome, Amalfi Coast, Dubrovnik, Santorini, and Athens.",
+    "Flying out of Chicago. We're open to the route order but want to minimize backtracking. Mix of hotels and Airbnbs.",
+    "OK let's look at intercity options -- ferries, trains, budget airlines between cities."
+  ],
+  "expect": {
+    "destination": true,
+    "datesSet": true,
+    "minCities": 3,
+    "minFlights": 1
+  }
+}
