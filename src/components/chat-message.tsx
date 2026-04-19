@@ -8,6 +8,7 @@ import type { UIMessage } from "ai";
 import { isReasoningUIPart, isToolUIPart, isTextUIPart } from "ai";
 import { ReasoningPart } from "@/components/reasoning-part";
 import { ToolCallPart } from "@/components/tool-call-part";
+import { CollapsedStepsSummary } from "@/components/collapsed-steps-summary";
 
 const mdComponents: Components = {
   h1: ({ children }) => (
@@ -99,6 +100,10 @@ function partIsRenderable(part: UIMessage["parts"][number]): boolean {
   return false;
 }
 
+function isProcessPart(part: UIMessage["parts"][number]): boolean {
+  return isReasoningUIPart(part) || part.type === "step-start" || isToolUIPart(part);
+}
+
 export interface ChatMessageProps {
   message: UIMessage;
   /** True while this assistant message is still receiving streamed parts */
@@ -125,6 +130,30 @@ export const ChatMessage = memo(function ChatMessage({
 
   const parts = message.parts;
   if (!parts.some(partIsRenderable)) return null;
+
+  const processParts = parts.filter(isProcessPart);
+  const hasProcessParts = processParts.length > 0;
+  const shouldCollapse = !isStreamingAssistant && hasProcessParts;
+
+  if (shouldCollapse) {
+    return (
+      <div className="flex w-full flex-col items-start gap-2">
+        <CollapsedStepsSummary parts={processParts} />
+        {parts.map((part, i) => {
+          if (!isTextUIPart(part) || !part.text?.trim()) return null;
+          return (
+            <div key={`text-${i}`} className="flex w-full min-w-0 justify-start animate-agent-part-in">
+              <div className="min-w-0 max-w-[85%] rounded-2xl px-4 py-2.5 text-sm bg-muted">
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+                  {part.text}
+                </ReactMarkdown>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
 
   return (
     <div className="flex w-full flex-col items-start gap-2">
