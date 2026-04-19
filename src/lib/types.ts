@@ -116,9 +116,11 @@ export interface DayPlan {
 
 export type RecommendationCategory =
   | "restaurant"
+  | "bar"
   | "hotel"
   | "attraction"
   | "activity"
+  | "shop"
   | "neighborhood"
   | "general";
 
@@ -196,6 +198,7 @@ export interface Trip {
   state: TripState;
   chatHistory: ChatMessage[];
   recommendations: Recommendation[];
+  recommenderPriorities: Record<string, number>;
   destination: string;
   startDate: string;
   endDate: string;
@@ -248,6 +251,7 @@ export function createNewTrip(id: string): Trip {
     state: createEmptyTripState(),
     chatHistory: [],
     recommendations: [],
+    recommenderPriorities: {},
     destination: "",
     startDate: "",
     endDate: "",

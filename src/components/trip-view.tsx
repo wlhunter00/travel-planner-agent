@@ -9,7 +9,8 @@ import { HotelCard } from "./hotel-card";
 import { DayTimeline } from "./day-timeline";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
-import { Download, FileText, Calendar, Sparkles, MapPin, UtensilsCrossed, Building2, Compass, LayoutGrid, Train, StickyNote, ExternalLink, Link, MessageSquare, X, User, Trash2, ChevronDown } from "lucide-react";
+import { Download, FileText, Calendar, Sparkles, MapPin, UtensilsCrossed, Wine, Building2, Compass, LayoutGrid, ShoppingBag, Train, StickyNote, ExternalLink, Link, MessageSquare, X, User, Trash2, ChevronDown } from "lucide-react";
+import { AddRecommendationForm } from "@/components/add-recommendation-form";
 import type { Recommendation, RecommendationCategory, ExtractedItem, SkeletonDay, ConfirmedHotel } from "@/lib/types";
 
 function CollapsibleSection({
@@ -96,7 +97,7 @@ export function TripView() {
               <p className="text-xs mt-1.5 text-muted-foreground/60">Start by telling the agent where you want to go.</p>
               <div className="mt-6 flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground/50">
                 <Sparkles className="size-3" />
-                <span>Have tips from friends? Click <strong className="text-muted-foreground/70">Recs</strong> in the chat panel to add them.</span>
+                <span>Have tips from friends? Drop them in the <strong className="text-muted-foreground/70">Friend Recommendations</strong> section below.</span>
               </div>
             </div>
           )}
@@ -171,9 +172,8 @@ export function TripView() {
             </CollapsibleSection>
           )}
 
-          {hasRecs && (
-            <RecommendationsSection recs={allRecs} tripId={trip.id} />
-          )}
+          <RecommendationsSection recs={allRecs} tripId={trip.id} />
+
 
           {hasContent && (
             <CollapsibleSection title="Export" icon={Download}>
@@ -330,27 +330,33 @@ function ConfirmedLodgingSection({ hotels }: { hotels: Record<string, ConfirmedH
 
 const CATEGORY_ICON: Record<RecommendationCategory, typeof MapPin> = {
   restaurant: UtensilsCrossed,
+  bar: Wine,
   hotel: Building2,
   attraction: MapPin,
   activity: Compass,
+  shop: ShoppingBag,
   neighborhood: LayoutGrid,
   general: Sparkles,
 };
 
 const CATEGORY_STYLE: Record<RecommendationCategory, string> = {
   restaurant: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
+  bar: "bg-rose-500/10 text-rose-600 dark:text-rose-400",
   hotel: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
   attraction: "bg-purple-500/10 text-purple-600 dark:text-purple-400",
   activity: "bg-green-500/10 text-green-600 dark:text-green-400",
+  shop: "bg-teal-500/10 text-teal-600 dark:text-teal-400",
   neighborhood: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
   general: "bg-gray-500/10 text-gray-600 dark:text-gray-400",
 };
 
 const CATEGORY_LABEL: Record<RecommendationCategory, string> = {
   restaurant: "Restaurants",
+  bar: "Bars & Nightlife",
   hotel: "Hotels",
   attraction: "Attractions",
   activity: "Activities",
+  shop: "Shops",
   neighborhood: "Neighborhoods",
   general: "General",
 };
@@ -455,15 +461,62 @@ interface RecGroup {
   taggedItems: TaggedItem[];
 }
 
+const PRIORITY_LABELS = ["", "Ignore", "Low", "Standard", "High", "Top"];
+const PRIORITY_BAR_HEIGHTS = ["h-1", "h-1.5", "h-2", "h-2.5", "h-3"];
+
+function PriorityMeter({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (level: number) => void;
+}) {
+  const [hovered, setHovered] = useState(0);
+  const display = hovered || value;
+  const label = PRIORITY_LABELS[display] || PRIORITY_LABELS[3];
+
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 hover:bg-muted/50 transition-colors"
+      onMouseLeave={() => setHovered(0)}
+      title="Click bars to set how much weight the agent gives this person's picks"
+    >
+      <span className="text-[10px] text-muted-foreground/70">Priority:</span>
+      <span className="inline-flex items-end gap-0.5">
+        {[1, 2, 3, 4, 5].map((level) => {
+          const filled = level <= display;
+          return (
+            <button
+              key={level}
+              type="button"
+              onClick={() => onChange(level)}
+              onMouseEnter={() => setHovered(level)}
+              className={`w-1 ${PRIORITY_BAR_HEIGHTS[level - 1]} rounded-sm transition-colors ${
+                filled ? "bg-primary" : "bg-muted-foreground/25 hover:bg-muted-foreground/40"
+              }`}
+              aria-label={`Set priority to ${PRIORITY_LABELS[level]}`}
+            />
+          );
+        })}
+      </span>
+      <span className="text-[10px] font-medium text-foreground/70 tabular-nums min-w-12">
+        {label}
+      </span>
+    </span>
+  );
+}
+
 function RecGroupCard({
   group,
   filteredItems,
+  tripId,
   onRemoveRec,
   onRemoveItem,
   onRemoveGroup,
 }: {
   group: RecGroup;
   filteredItems: TaggedItem[];
+  tripId: string;
   onRemoveRec: (recId: string) => void;
   onRemoveItem: (recId: string, itemIndex: number) => void;
   onRemoveGroup: (recommender: string) => void;
@@ -474,6 +527,20 @@ function RecGroupCard({
   const emptyRecs = group.recs.filter((r) => r.status === "ready" && r.extractedItems.length === 0);
   const groupLabel = hasName ? `${group.recommender}'s picks` : "this group";
 
+  const priority = useTripStore(
+    (s) => s.trip?.recommenderPriorities?.[group.recommender] ?? 3
+  );
+  const setRecommenderPriority = useTripStore((s) => s.setRecommenderPriority);
+
+  function handlePriorityChange(stars: number) {
+    setRecommenderPriority(group.recommender, stars);
+    fetch("/api/recommendations", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tripId, recommender: group.recommender, priority: stars }),
+    });
+  }
+
   return (
     <div className="space-y-2 group/group">
       <div className="flex items-center justify-between">
@@ -483,6 +550,9 @@ function RecGroupCard({
               <User className="size-3 text-primary/60" />
               {group.recommender}&apos;s picks
             </span>
+          )}
+          {hasName && (
+            <PriorityMeter value={priority} onChange={handlePriorityChange} />
           )}
           <span className="text-[10px] text-muted-foreground/50">
             {group.taggedItems.length} item{group.taggedItems.length !== 1 ? "s" : ""}
@@ -606,12 +676,27 @@ function RecommendationsSection({
     );
   }
 
-  const badge = totalItems > 0
-    ? `${totalItems} item${totalItems !== 1 ? "s" : ""}`
-    : `${recs.length} source${recs.length !== 1 ? "s" : ""}`;
+  const badge = recs.length === 0
+    ? "add tips from friends"
+    : totalItems > 0
+      ? `${totalItems} item${totalItems !== 1 ? "s" : ""}`
+      : `${recs.length} source${recs.length !== 1 ? "s" : ""}`;
 
   return (
-    <CollapsibleSection title="Friend Recommendations" icon={Sparkles} badge={badge}>
+    <CollapsibleSection
+      title="Friend Recommendations"
+      icon={Sparkles}
+      badge={badge}
+      defaultOpen={recs.length === 0 ? false : true}
+    >
+      <div className="mb-4 rounded-lg border border-dashed border-border/60 bg-muted/20 p-3">
+        <AddRecommendationForm
+          tripId={tripId}
+          variant="compact"
+          placeholder="Paste a URL, type a tip, or upload a PDF..."
+        />
+      </div>
+
       {allCategories.length > 1 && (
         <div className="flex flex-wrap gap-1.5 mb-3">
           <button
@@ -661,6 +746,7 @@ function RecommendationsSection({
               key={group.recommender}
               group={group}
               filteredItems={filtered}
+              tripId={tripId}
               onRemoveRec={handleRemoveRec}
               onRemoveItem={handleRemoveItem}
               onRemoveGroup={handleRemoveGroup}

@@ -15,6 +15,7 @@ interface TripStore {
   removeRecommendation: (id: string) => void;
   removeRecommendationGroup: (recommender: string) => void;
   removeExtractedItem: (recId: string, itemIndex: number) => void;
+  setRecommenderPriority: (recommender: string, priority: number) => void;
 }
 
 export const useTripStore = create<TripStore>((set) => ({
@@ -87,12 +88,14 @@ export const useTripStore = create<TripStore>((set) => ({
   removeRecommendationGroup: (recommender) =>
     set((s) => {
       if (!s.trip) return s;
+      const { [recommender]: _, ...restPriorities } = s.trip.recommenderPriorities || {};
       return {
         trip: {
           ...s.trip,
           recommendations: (s.trip.recommendations || []).filter(
             (r) => (r.recommender || "_unnamed") !== recommender
           ),
+          recommenderPriorities: restPriorities,
           updatedAt: new Date().toISOString(),
         },
       };
@@ -108,6 +111,21 @@ export const useTripStore = create<TripStore>((set) => ({
       }).filter((r) => r.extractedItems.length > 0 || r.status !== "ready");
       return {
         trip: { ...s.trip, recommendations: recs, updatedAt: new Date().toISOString() },
+      };
+    }),
+
+  setRecommenderPriority: (recommender, priority) =>
+    set((s) => {
+      if (!s.trip) return s;
+      return {
+        trip: {
+          ...s.trip,
+          recommenderPriorities: {
+            ...(s.trip.recommenderPriorities || {}),
+            [recommender]: priority,
+          },
+          updatedAt: new Date().toISOString(),
+        },
       };
     }),
 }));

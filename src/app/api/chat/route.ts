@@ -118,46 +118,137 @@ const PHASE_CATEGORY_MAP: Record<Phase, RecommendationCategory[] | "all"> = {
   flights: [],
   cities: "all",
   hotels: ["hotel", "neighborhood"],
-  day_plans: ["attraction", "activity", "neighborhood"],
-  restaurants: ["restaurant"],
+  day_plans: ["attraction", "activity", "shop", "neighborhood", "bar"],
+  restaurants: ["restaurant", "bar"],
   review: "all",
 };
 
-function formatRecommendations(recs: Recommendation[], phase?: Phase): string {
-  const readyRecs = recs.filter((r) => r.status === "ready" && r.extractedItems.length > 0);
-  if (readyRecs.length === 0) return "";
+const PRIORITY_LABELS = ["", "ignore", "low", "standard", "high", "top"] as const;
 
-  const allItems = readyRecs.flatMap((r) =>
-    r.extractedItems.map((item) => ({ ...item, recommender: r.recommender }))
-  );
+function normalizeName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .sort()
+    .join("");
+}
+
+interface RecommenderHit {
+  name: string;
+  priority: number;
+  notes?: string;
+}
+
+interface AggregatedItem {
+  name: string;
+  category: RecommendationCategory;
+  location?: string;
+  recommenders: RecommenderHit[];
+  notes: string[];
+}
+
+/**
+ * Group raw extracted items across all recommendations by normalized name +
+ * category so the agent sees one row per real-world place, not one row per
+ * recommender. Powers consensus-aware prompting and `get_recommendations`.
+ */
+function aggregateRecommendations(recs: Recommendation[]): AggregatedItem[] {
+  const groups = new Map<string, AggregatedItem>();
+  const readyRecs = recs.filter((r) => r.status === "ready" && r.extractedItems.length > 0);
+  for (const r of readyRecs) {
+    for (const item of r.extractedItems) {
+      const key = `${item.category}|${normalizeName(item.name)}`;
+      const recName = r.recommender ?? "(unattributed)";
+      const existing = groups.get(key);
+      if (!existing) {
+        groups.set(key, {
+          name: item.name,
+          category: item.category,
+          location: item.location,
+          recommenders: [{ name: recName, priority: 3, notes: item.notes }],
+          notes: item.notes ? [item.notes] : [],
+        });
+        continue;
+      }
+      const dupRec = existing.recommenders.find((rh) => rh.name === recName);
+      if (!dupRec) {
+        existing.recommenders.push({ name: recName, priority: 3, notes: item.notes });
+      }
+      if (!existing.location && item.location) existing.location = item.location;
+      if (item.notes && !existing.notes.includes(item.notes)) existing.notes.push(item.notes);
+    }
+  }
+  return Array.from(groups.values());
+}
+
+function applyPriorities(
+  groups: AggregatedItem[],
+  priorities: Record<string, number> = {},
+): AggregatedItem[] {
+  for (const g of groups) {
+    for (const rh of g.recommenders) {
+      rh.priority = priorities[rh.name] ?? 3;
+    }
+  }
+  return groups;
+}
+
+function formatRecommendations(
+  recs: Recommendation[],
+  phase?: Phase,
+  priorities?: Record<string, number>,
+): string {
+  const groups = applyPriorities(aggregateRecommendations(recs), priorities);
+  if (groups.length === 0) return "";
 
   const mapping = phase ? PHASE_CATEGORY_MAP[phase] : "all";
   const relevantCategories: RecommendationCategory[] =
     mapping === "all"
-      ? ["restaurant", "hotel", "attraction", "activity", "neighborhood", "general"]
+      ? ["restaurant", "bar", "hotel", "attraction", "activity", "shop", "neighborhood", "general"]
       : (mapping as RecommendationCategory[]);
 
   const relevant = relevantCategories.length > 0
-    ? allItems.filter((i) => relevantCategories.includes(i.category))
+    ? groups.filter((g) => relevantCategories.includes(g.category))
     : [];
-  const other = allItems.filter((i) => !relevantCategories.includes(i.category));
+  const other = groups.filter((g) => !relevantCategories.includes(g.category));
 
   const lines: string[] = [];
 
   if (relevant.length > 0) {
-    const byCategory = new Map<string, typeof relevant>();
-    for (const item of relevant) {
-      const list = byCategory.get(item.category) || [];
-      list.push(item);
-      byCategory.set(item.category, list);
+    const byCategory = new Map<string, AggregatedItem[]>();
+    for (const g of relevant) {
+      const list = byCategory.get(g.category) || [];
+      list.push(g);
+      byCategory.set(g.category, list);
     }
+    // Treat anyone the user has not muted (priority > 1 = not "ignore") as a real vote.
+    const activeCount = (g: AggregatedItem) =>
+      g.recommenders.filter((r) => r.priority > 1).length;
+    const maxPriority = (g: AggregatedItem) =>
+      g.recommenders.reduce((m, r) => Math.max(m, r.priority), 0);
     for (const [cat, items] of byCategory) {
+      const sorted = [...items].sort((a, b) => {
+        const ac = activeCount(a);
+        const bc = activeCount(b);
+        if (bc !== ac) return bc - ac;
+        return maxPriority(b) - maxPriority(a);
+      });
       lines.push(`${cat.charAt(0).toUpperCase() + cat.slice(1)}s:`);
-      for (const item of items) {
-        let line = `- ${item.name}`;
-        if (item.location) line += ` (${item.location})`;
-        if (item.recommender) line += ` -- from ${item.recommender}`;
-        if (item.notes) line += `: "${item.notes}"`;
+      for (const g of sorted) {
+        let line = `- ${g.name}`;
+        if (g.location) line += ` (${g.location})`;
+        const votes = activeCount(g);
+        if (votes >= 2) {
+          const tag = votes >= 3 ? "STRONG CONSENSUS" : "CONSENSUS";
+          line += ` -- ${tag} (${votes} friends)`;
+        }
+        const recList = g.recommenders
+          .map((r) => `${r.name} (${PRIORITY_LABELS[r.priority]})`)
+          .join(", ");
+        line += votes >= 2 ? ` [${recList}]` : ` -- from ${recList}`;
+        if (g.notes.length > 0) line += `: "${g.notes.join(" | ")}"`;
         lines.push(line);
       }
     }
@@ -165,9 +256,7 @@ function formatRecommendations(recs: Recommendation[], phase?: Phase): string {
 
   if (other.length > 0) {
     const counts = new Map<string, number>();
-    for (const item of other) {
-      counts.set(item.category, (counts.get(item.category) || 0) + 1);
-    }
+    for (const g of other) counts.set(g.category, (counts.get(g.category) || 0) + 1);
     const parts: string[] = [];
     for (const [cat, count] of counts) {
       parts.push(`${count} ${cat} recommendation${count > 1 ? "s" : ""}`);
@@ -186,7 +275,7 @@ export async function POST(req: Request) {
   const preferences = await getPreferences();
 
   const recsText = trip?.recommendations?.length
-    ? formatRecommendations(trip.recommendations, trip.phase as Phase | undefined)
+    ? formatRecommendations(trip.recommendations, trip.phase as Phase | undefined, trip.recommenderPriorities)
     : undefined;
 
   const systemPrompt = buildSystemPrompt({
@@ -445,28 +534,50 @@ export async function POST(req: Request) {
         "Look up friend/personal recommendations by category. Use when you want to check what was recommended for a category not shown in your current context, or to get full details on all recommendations.",
       inputSchema: z.object({
         category: z
-          .enum(["restaurant", "hotel", "attraction", "activity", "neighborhood", "all"])
+          .enum(["restaurant", "bar", "hotel", "attraction", "activity", "shop", "neighborhood", "all"])
           .optional()
           .default("all")
           .describe("Filter by category, or 'all' for everything"),
       }),
       execute: async ({ category }: { category?: string }) => {
         const recs = trip?.recommendations || [];
-        const readyRecs = recs.filter((r: Recommendation) => r.status === "ready");
-        if (readyRecs.length === 0)
+        const prio = trip?.recommenderPriorities ?? {};
+        const groups = applyPriorities(aggregateRecommendations(recs), prio);
+        if (groups.length === 0)
           return { items: [], message: "No recommendations have been added yet." };
-        const allItems = readyRecs.flatMap((r: Recommendation) =>
-          r.extractedItems.map((item) => ({
-            ...item,
-            recommender: r.recommender,
-            source: r.rawInput,
-          }))
-        );
         const filtered =
           !category || category === "all"
-            ? allItems
-            : allItems.filter((i) => i.category === category);
-        return { count: filtered.length, items: filtered };
+            ? groups
+            : groups.filter((g) => g.category === category);
+        const items = filtered
+          .map((g) => {
+            const activeVotes = g.recommenders.filter((r) => r.priority > 1).length;
+            const maxPriority = g.recommenders.reduce((m, r) => Math.max(m, r.priority), 0);
+            return {
+              name: g.name,
+              category: g.category,
+              location: g.location,
+              notes: g.notes.length > 0 ? g.notes.join(" | ") : undefined,
+              recommenders: g.recommenders.map((r) => ({
+                name: r.name,
+                priority: PRIORITY_LABELS[r.priority],
+              })),
+              consensus:
+                activeVotes >= 3
+                  ? "STRONG CONSENSUS"
+                  : activeVotes === 2
+                    ? "CONSENSUS"
+                    : undefined,
+              activeVotes,
+              _maxPriority: maxPriority,
+            };
+          })
+          .sort((a, b) => {
+            if (b.activeVotes !== a.activeVotes) return b.activeVotes - a.activeVotes;
+            return b._maxPriority - a._maxPriority;
+          })
+          .map(({ _maxPriority: _omit, ...rest }) => rest);
+        return { count: items.length, items };
       },
     },
 

@@ -57,6 +57,28 @@ When friend or personal recommendations are present for the current planning cat
 
 Never skip Phase 1 by jumping straight to "your friend recommended X, let's go with that." The user wants your independent judgment layered on top of friend input, not a rubber stamp.
 
+**Recommender priority levels:** Each recommender has a priority level the user has set: \`ignore\`, \`low\`, \`standard\`, \`high\`, or \`top\`. This reflects how much weight the user wants you to give that person's input.
+- **top / high:** strong signals — actively work these picks into the comparison and likely include them unless your research surfaces a clear problem. Call out when your own research validates them.
+- **standard:** neutral — evaluate on merit alongside your own finds.
+- **low:** treat as "nice to know" — only surface if independently validated by your research.
+- **ignore:** the user has explicitly deprioritized this person — do not feature their picks in recommendations or comparisons unless the user asks you to.
+
+### Consensus signals (prioritize converging picks)
+
+Recommendations are pre-aggregated for you: the same place suggested by multiple friends collapses into a **single line** that lists every recommender, and lines are sorted with the most-recommended places first. Watch for two consensus signals:
+
+1. **Multi-friend consensus** — Lines tagged \`CONSENSUS (2 friends)\` or \`STRONG CONSENSUS (3 friends)\` mean multiple non-ignored friends independently named the same place. Treat this as a high-confidence vote of trust:
+   - Lead the comparison with consensus picks. Don't bury them under your own finds.
+   - Only override a \`STRONG CONSENSUS\` pick if your independent research surfaces a *specific* problem (closed/relocated, recent ratings collapse, geographically wrong for this trip, dietary mismatch). "I found something slightly better" is **not** enough to override 3+ friends — say so honestly: "Three friends recommended X; my research turned up Y as a near-tie, but I'd still go with X given the consensus."
+   - In your reply, call the consensus out by name: "Pasteis de Belem came up from both Sarah and Jake — that's a strong signal."
+
+2. **Cross-validation (friends + your research converge)** — When your own \`web_search\`, \`search_places\`, \`deep_research\`, or lodging searches **independently surface a place that a friend also recommended**, that's the strongest possible signal. This is the jackpot — treat it as near-mandatory inclusion:
+   - Explicitly flag it: "Sarah recommended Cervejaria Ramiro, and it's also a top-3 result on Eater Lisbon and the #1 seafood spot in Google Places (4.5★, 12k reviews) — this one's a no-brainer."
+   - Prioritize it over both other friend picks **and** other research finds.
+   - When you commit it to the itinerary via \`update_trip\`, set \`recommendationSource: "friend_recommendation"\` (it originated with the friend; your research just confirmed it).
+
+If a consensus pick has no validation from your research either way, still lean toward including it — multiple independent humans saying "go here" carries real weight.
+
 ## Long-haul flight validation (multi-country / open-jaw)
 
 When the user names where they are flying **from** (metro, airport, or "flying out of X") and the trip is **international with multiple countries or an open-jaw shape**:

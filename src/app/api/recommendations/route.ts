@@ -12,8 +12,20 @@ export const maxDuration = 60;
 const extractedItemSchema = z.object({
   name: z.string().describe("Name of the place, venue, or recommendation"),
   category: z
-    .enum(["restaurant", "hotel", "attraction", "activity", "neighborhood", "general"])
-    .describe("Best-fit category"),
+    .enum(["restaurant", "bar", "hotel", "attraction", "activity", "shop", "neighborhood", "general"])
+    .describe(
+      "Best-fit category. Pick the most specific bucket: " +
+        "restaurant (places primarily for meals — cafes, bakeries, food markets, gelato, brunch spots), " +
+        "bar (places primarily for drinks/nightlife — bars, pubs, cocktail lounges, wine bars, breweries, clubs, rooftops), " +
+        "hotel (any lodging — hotels, hostels, Airbnbs, guesthouses), " +
+        "attraction (museums, churches, palaces, monuments, landmarks, viewpoints, plazas, bridges, libraries — places to see/visit), " +
+        "activity (tours, classes, day trips, parks, beaches, experiences — things to do), " +
+        "shop (boutiques, bookstores, designer stores, concept shops, vintage stores, craft stores, malls), " +
+        "neighborhood (named districts or areas to explore). " +
+        "If a venue serves food but is primarily known for drinks/atmosphere (e.g. a cocktail bar with small plates), pick 'bar'. " +
+        "Iconic bookstores famous as cultural landmarks (e.g. Livraria Lello) are 'attraction'; smaller/local bookshops are 'shop'. " +
+        "Use 'general' ONLY as a last resort when nothing else fits."
+    ),
   location: z.string().nullable().describe("City, neighborhood, or address if identifiable"),
   notes: z.string().nullable().describe("Context about why it was recommended or any tips"),
   sourceUrl: z.string().nullable().describe("URL if the recommendation came from a link"),
@@ -92,13 +104,79 @@ const PRICE_LEVEL_LABELS: Record<number, string> = {
 function categorizePlaceTypes(types?: string[]): ExtractedItem["category"] {
   if (!types) return "general";
   const t = types.join(",").toLowerCase();
-  if (t.includes("restaurant") || t.includes("food") || t.includes("cafe") || t.includes("bakery") || t.includes("bar")) return "restaurant";
-  if (t.includes("lodging") || t.includes("hotel")) return "hotel";
-  if (t.includes("museum") || t.includes("church") || t.includes("monument") || t.includes("tourist_attraction")) return "attraction";
-  if (t.includes("park") || t.includes("gym") || t.includes("spa") || t.includes("amusement")) return "activity";
-  if (t.includes("neighborhood") || t.includes("sublocality") || t.includes("locality")) return "neighborhood";
-  // Books, shops, stores, etc. → activity
-  if (t.includes("store") || t.includes("book") || t.includes("shop")) return "activity";
+  // Check bar/nightlife BEFORE restaurant — many bars are also tagged "restaurant" in
+  // Google's data, so we prioritize the more specific drinks/nightlife signal.
+  if (
+    t.includes("bar") ||
+    t.includes("pub") ||
+    t.includes("night_club") ||
+    t.includes("nightclub") ||
+    t.includes("winery") ||
+    t.includes("brewery") ||
+    t.includes("liquor_store")
+  ) return "bar";
+  if (
+    t.includes("restaurant") ||
+    t.includes("food") ||
+    t.includes("cafe") ||
+    t.includes("coffee") ||
+    t.includes("bakery") ||
+    t.includes("meal_")
+  ) return "restaurant";
+  if (t.includes("lodging") || t.includes("hotel") || t.includes("hostel") || t.includes("guest_house") || t.includes("apartment")) return "hotel";
+  if (
+    t.includes("museum") ||
+    t.includes("church") ||
+    t.includes("cathedral") ||
+    t.includes("monument") ||
+    t.includes("tourist_attraction") ||
+    t.includes("art_gallery") ||
+    t.includes("library") ||
+    t.includes("market") ||
+    t.includes("plaza") ||
+    t.includes("square") ||
+    t.includes("bridge") ||
+    t.includes("castle") ||
+    t.includes("palace") ||
+    t.includes("synagogue") ||
+    t.includes("mosque") ||
+    t.includes("temple") ||
+    t.includes("place_of_worship") ||
+    t.includes("historical") ||
+    t.includes("landmark") ||
+    t.includes("aquarium") ||
+    t.includes("zoo")
+  ) return "attraction";
+  if (
+    t.includes("park") ||
+    t.includes("gym") ||
+    t.includes("spa") ||
+    t.includes("amusement") ||
+    t.includes("stadium") ||
+    t.includes("beach") ||
+    t.includes("hiking") ||
+    t.includes("tour") ||
+    t.includes("travel_agency")
+  ) return "activity";
+  if (
+    t.includes("neighborhood") ||
+    t.includes("sublocality") ||
+    t.includes("locality") ||
+    t.includes("political")
+  ) return "neighborhood";
+  if (
+    t.includes("book_store") ||
+    t.includes("clothing_store") ||
+    t.includes("shoe_store") ||
+    t.includes("jewelry_store") ||
+    t.includes("department_store") ||
+    t.includes("furniture_store") ||
+    t.includes("home_goods_store") ||
+    t.includes("shopping_mall") ||
+    t.includes("store") ||
+    t.includes("shop")
+  ) return "shop";
+  // Generic Google fallback types — let the LLM's category stand if we got here.
   return "general";
 }
 
@@ -262,21 +340,23 @@ async function triageDocument(rawText: string): Promise<string> {
     const { object } = await generateObject({
       model: openai("gpt-4o-mini"),
       schema: triageSchema,
-      prompt: `You are analyzing a travel document to find which sections contain actual recommendations vs background reference content.
+      prompt: `You are analyzing a travel document to find which sections contain actual recommendations vs pure boilerplate.
 
-KEEP sections that contain:
-- Specific places someone explicitly recommends to stay/eat/visit/do
-- Scheduled itinerary items (hotels, tours, day trips, dinners, activities)
-- Personal picks, "must-see" lists, friend's suggestions
-- Booked accommodations or scheduled experiences
+DEFAULT: KEEP. Bias strongly toward keeping blocks. The cost of dropping a real recommendation is much higher than the cost of including some extra context.
 
-DISCARD sections that are:
-- Encyclopedia/history descriptions of regions or neighborhoods
-- Generic "About this area" or "A little bit of history" overviews mentioning many places as context
-- Glossaries, definitions, historical background, factual information
-- Boilerplate, page numbers, navigation, contact information, headers/footers
+KEEP a block if ANY of the following is true:
+- It names ANY specific place a traveler could visit, stay at, eat at, or do (restaurants, hotels, attractions, monuments, neighborhoods, viewpoints, parks, shops, bars, etc.) — even ONE named place is enough
+- It contains a bullet list, numbered list, or dash-prefixed entries (these are almost always picks)
+- It is a scheduled itinerary item, day plan, booked accommodation, or "must-see"/"highlights" list
+- It mixes personal context (e.g. "10 min walk from Airbnb", history blurbs) with named places — keep it; we want the names
 
-Return the IDs of blocks to KEEP. Be selective — when in doubt, exclude. The goal is to keep only blocks that name specific places someone is recommending or has scheduled, not blocks that mention places as part of general descriptions.
+DISCARD ONLY blocks that are PURELY:
+- Page numbers, headers/footers, navigation breadcrumbs ("-- 3 of 10 --", "Page 4")
+- Contact info, copyright, legal boilerplate
+- Standalone history/encyclopedia paragraphs with NO named venue a traveler would visit (e.g. abstract prose about a region's geography or political history with zero named places)
+- Generic food/cuisine glossaries with no specific restaurants attached (e.g. "Bacalhau is salted cod" with no place to eat it)
+
+When a block has even one named place worth visiting alongside historical or contextual prose, KEEP IT. Do NOT discard a block just because it also contains background information — recall matters more than precision here.
 
 Document blocks:
 ${numbered}`,
@@ -297,10 +377,15 @@ ${numbered}`,
   }
 }
 
+function normalizeKey(name: string): string {
+  const words = name.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(Boolean);
+  return words.sort().join("");
+}
+
 function deduplicateItems(items: ExtractedItem[]): ExtractedItem[] {
   const seen = new Map<string, ExtractedItem>();
   for (const item of items) {
-    const key = item.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const key = normalizeKey(item.name);
     const existing = seen.get(key);
     if (!existing || (item.notes && !existing.notes)) {
       seen.set(key, item);
@@ -309,7 +394,55 @@ function deduplicateItems(items: ExtractedItem[]): ExtractedItem[] {
   return Array.from(seen.values());
 }
 
-const EXTRACT_PROMPT = `Extract ALL travel recommendations from the following text. Identify every specific named place — restaurants, hotels, attractions, activities, bookshops, wineries, palaces, churches, museums, neighborhoods, viewpoints, pastry shops, etc. Include the context about why each was mentioned or tips given. If you cannot identify any specific travel recommendations, return an empty array.`;
+function deduplicateByAddress(items: ExtractedItem[]): ExtractedItem[] {
+  const seen = new Map<string, ExtractedItem>();
+  const result: ExtractedItem[] = [];
+  for (const item of items) {
+    if (!item.location) {
+      result.push(item);
+      continue;
+    }
+    const addrKey = item.location.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const existing = seen.get(addrKey);
+    if (!existing) {
+      seen.set(addrKey, item);
+      result.push(item);
+    } else if (item.notes && !existing.notes) {
+      const idx = result.indexOf(existing);
+      if (idx >= 0) result[idx] = item;
+      seen.set(addrKey, item);
+    }
+  }
+  return result;
+}
+
+const EXTRACT_PROMPT = `Extract EVERY specific named place from the following text. Be thorough — do not skip items even if they have minimal context.
+
+What to extract:
+- Restaurants, cafes, bars, bakeries, gelato shops, food markets, brunch spots
+- Hotels, Airbnbs, hostels, accommodations
+- Attractions, monuments, palaces, castles, churches, cathedrals, museums, towers
+- Activities, tours, boat rides, wine tastings
+- Bookshops, factories, galleries, cultural venues
+- Neighborhoods, viewpoints (miradouros), parks, plazas, bridges
+- Any other named location or venue
+
+IMPORTANT: Pay special attention to bullet-point lists and short entries like "- Alma" or "- Heim cafe - brunch". These are just as important as longer descriptions. Extract every single named place even if it only appears as a brief list item with no additional context.
+
+NOTES FIELD GUIDELINES — be strict about this:
+- Write notes as a brief, GENERIC reason this place is worth visiting (1 short sentence, max ~80 chars).
+- Capture useful tips that apply to anyone: cuisine type, what it's famous for, must-try dishes, booking advice, best time to visit, special features.
+- DO NOT include the recommender's personal context. Strip out:
+  * "Near my Airbnb" / "5 min walk from Airbnb" / "around the corner from us"
+  * "We loved this" / "I went here" / "my favorite"
+  * Personal walking times or distances from anywhere
+  * Day-of-week scheduling like "Tuesday lunch"
+  * Personal pricing math like "8e discount with my voucher"
+- If the only context is personal (e.g. "5 min walk from Airbnb"), leave notes empty rather than including it.
+- Good notes: "Famous for pastel de nata", "Inspiration for Harry Potter; book tickets in advance", "Best francesinha in Porto (heavy meat dish)"
+- Bad notes: "RIGHT AROUND THE CORNER FROM AIRBNB!", "5 min walk from Airbnb; closes at 7pm", "We had lunch here"
+
+If you cannot identify any specific travel recommendations, return an empty array.`;
 
 async function extractItemsFromChunk(
   chunk: string,
@@ -336,14 +469,15 @@ async function extractItems(
   sourceUrl?: string
 ): Promise<ExtractedItem[]> {
   const triaged = await triageDocument(rawText);
-  const chunks = chunkText(triaged, 12000, 500);
+  const chunks = chunkText(triaged, 8000, 1000);
 
   const chunkResults = await Promise.all(
     chunks.map((chunk) => extractItemsFromChunk(chunk, sourceUrl))
   );
 
-  const allItems = deduplicateItems(chunkResults.flat());
-  return enrichItemsViaPlaces(allItems);
+  const dedupedByName = deduplicateItems(chunkResults.flat());
+  const enriched = await enrichItemsViaPlaces(dedupedByName);
+  return deduplicateByAddress(enriched);
 }
 
 async function enrichItemsViaPlaces(items: ExtractedItem[]): Promise<ExtractedItem[]> {
@@ -364,13 +498,18 @@ async function enrichItemsViaPlaces(items: ExtractedItem[]): Promise<ExtractedIt
         const reviewCountStr = details.reviewCount ? `(${details.reviewCount} reviews)` : "";
         const ratingBadge = [ratingStr, reviewCountStr].filter(Boolean).join(" ");
 
-        let notes: string | undefined;
-        if (item.notes) {
-          notes = ratingBadge ? `${ratingBadge} · ${item.notes}` : item.notes;
-        } else {
-          const parts = [ratingBadge, details.description].filter(Boolean);
-          notes = parts.join(" · ") || undefined;
-        }
+        // Compose notes: rating · Google's description · recommender's tip
+        // Skip the recommender's tip if it duplicates Google's description.
+        const description = details.description?.trim();
+        const personalNote = item.notes?.trim();
+        const isRedundant =
+          description && personalNote &&
+          (description.toLowerCase().includes(personalNote.toLowerCase()) ||
+           personalNote.toLowerCase().includes(description.toLowerCase()));
+
+        const noteParts = [ratingBadge, description];
+        if (personalNote && !isRedundant) noteParts.push(personalNote);
+        const notes = noteParts.filter(Boolean).join(" · ") || undefined;
 
         return {
           ...item,
@@ -379,7 +518,14 @@ async function enrichItemsViaPlaces(items: ExtractedItem[]): Promise<ExtractedIt
           notes,
           sourceUrl: item.sourceUrl || details.website || undefined,
           priceRange: item.priceRange || (details.priceLevel != null ? PRICE_LEVEL_LABELS[details.priceLevel] : undefined),
-          category: item.category || categorizePlaceTypes(top.types),
+          // Prefer Google's categorization when it's specific; only fall back to the LLM's
+          // pick if Google also returns "general". This avoids markets/landmarks/etc. being
+          // labeled "general" just because the LLM didn't have a better bucket.
+          category: (() => {
+            const googleCat = categorizePlaceTypes(top.types);
+            if (googleCat !== "general") return googleCat;
+            return item.category || "general";
+          })(),
         };
       } catch {
         return item;
@@ -469,10 +615,12 @@ export async function DELETE(req: Request) {
   }
 
   if (recommender && !recId) {
-    // Bulk delete: remove all recommendations from this recommender
     trip.recommendations = (trip.recommendations || []).filter(
       (r) => (r.recommender || "_unnamed") !== recommender
     );
+    if (trip.recommenderPriorities) {
+      delete trip.recommenderPriorities[recommender];
+    }
   } else if (itemIndexParam != null && recId) {
     const idx = parseInt(itemIndexParam, 10);
     trip.recommendations = (trip.recommendations || []).map((r) => {
@@ -489,4 +637,43 @@ export async function DELETE(req: Request) {
   await saveTrip(trip);
 
   return Response.json({ success: true });
+}
+
+export async function PATCH(req: Request) {
+  try {
+    const { tripId, recommender, priority } = (await req.json()) as {
+      tripId: string;
+      recommender: string;
+      priority: number;
+    };
+
+    if (!tripId || !recommender || priority == null) {
+      return Response.json(
+        { error: "tripId, recommender, and priority are required" },
+        { status: 400 }
+      );
+    }
+
+    if (!Number.isInteger(priority) || priority < 1 || priority > 5) {
+      return Response.json(
+        { error: "priority must be an integer between 1 and 5" },
+        { status: 400 }
+      );
+    }
+
+    const trip = await getTrip(tripId);
+    if (!trip) {
+      return Response.json({ error: "Trip not found" }, { status: 404 });
+    }
+
+    if (!trip.recommenderPriorities) trip.recommenderPriorities = {};
+    trip.recommenderPriorities[recommender] = priority;
+    trip.updatedAt = new Date().toISOString();
+    await saveTrip(trip);
+
+    return Response.json({ success: true });
+  } catch (err) {
+    console.error("Recommendations PATCH error:", err);
+    return Response.json({ error: "Internal server error" }, { status: 500 });
+  }
 }
