@@ -9,10 +9,10 @@ import {
   useCallback,
   useMemo,
   type FormEvent,
+  type KeyboardEvent,
   type RefObject,
 } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTripStore } from "@/lib/store";
 import { ChatMessage } from "@/components/chat-message";
@@ -286,13 +286,20 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="p-3 border-t flex gap-2">
-        <Input
+      <form onSubmit={handleSubmit} className="p-3 border-t flex gap-2 items-end">
+        <textarea
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
+          onKeyDown={(e: KeyboardEvent<HTMLTextAreaElement>) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              handleSubmit(e as unknown as FormEvent);
+            }
+          }}
           placeholder="Tell me about your trip..."
           disabled={isLoading}
-          className="flex-1"
+          rows={1}
+          className="flex-1 resize-none rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-base outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 md:text-sm dark:bg-input/30 field-sizing-content max-h-40 overflow-y-auto"
         />
         <Button type="submit" disabled={isLoading || !inputValue.trim()} size="sm">
           Send
