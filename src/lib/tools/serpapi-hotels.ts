@@ -27,7 +27,7 @@ const SORT_MAP: Record<string, number> = {
 };
 
 const EMPTY_HOTELS_NOTE =
-  "No hotel results from the search provider. Aggregator inventory for dates many months out is often sparse or unreliable — do not retry the same query repeatedly. Prefer search_places + web_search (or official hotel sites) to name concrete properties and check pricing.";
+  "No hotel results from the search provider. Aggregator inventory for dates many months out is often sparse or unreliable — do not retry the same query repeatedly. Prefer search_places + web_search (or official hotel sites) to name concrete properties and check pricing. For each hotel you recommend, call build_booking_url to generate a working Booking.com link — never pass through booking.com or OTA URLs from web_search results, as they contain session-specific parameters that break immediately.";
 
 export async function searchHotels(params: HotelSearchParams): Promise<{
   hotels: HotelResult[];

@@ -13,6 +13,7 @@ import { webSearch } from "@/lib/tools/exa";
 import { searchTours } from "@/lib/tools/exa-tours";
 import { createPeekClient } from "@/lib/tools/peek";
 import { deepResearch } from "@/lib/tools/research";
+import { buildBookingUrl } from "@/lib/tools/booking-url";
 import { updatePreferencesTool, saveTripSummaryTool } from "@/lib/tools/preferences";
 import { pushToWanderlog } from "@/lib/tools/wanderlog/push-to-wanderlog";
 import { z } from "zod";
@@ -161,6 +162,20 @@ export async function POST(req: Request) {
       }),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       execute: async (args: any) => searchHotels(args),
+    },
+
+    build_booking_url: {
+      description:
+        "Build a working Booking.com search URL for a specific hotel. Use this whenever you recommend a hotel found via web_search or deep_research — never pass through raw booking.com links from search results (they contain expired session parameters). The structured lodging tools (search_hotels, search_vacation_rentals) already return working booking links, so this is only needed for the web-search fallback path.",
+      inputSchema: z.object({
+        hotelName: z.string().describe("Exact hotel name"),
+        city: z.string().describe("City and country (e.g. 'Rome, Italy')"),
+        checkIn: z.string().describe("Check-in date (YYYY-MM-DD)"),
+        checkOut: z.string().describe("Check-out date (YYYY-MM-DD)"),
+        adults: z.number().optional().default(2),
+      }),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      execute: async (args: any) => buildBookingUrl(args),
     },
 
     search_vacation_rentals: {
