@@ -193,6 +193,110 @@ function chunkText(text: string, maxChars: number, overlap: number): string[] {
   return chunks;
 }
 
+// ── Document triage ───────────────────────────────────────────────────────
+
+const TRIAGE_MIN_LENGTH = 5000;
+const TRIAGE_MAX_LENGTH = 400_000;
+const BLOCK_TARGET_CHARS = 800;
+
+function splitIntoBlocks(text: string): { id: number; text: string }[] {
+  // First pass: split on blank lines (paragraph boundaries)
+  const paragraphs = text
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  // Second pass: merge tiny paragraphs together and split oversized ones
+  const blocks: string[] = [];
+  let buffer = "";
+
+  const flushBuffer = () => {
+    if (buffer.trim()) blocks.push(buffer.trim());
+    buffer = "";
+  };
+
+  for (const p of paragraphs) {
+    if (p.length > BLOCK_TARGET_CHARS) {
+      flushBuffer();
+      // Split oversized paragraphs at sentence boundaries
+      const sentences = p.match(/[^.!?]+[.!?]+|\S+/g) ?? [p];
+      let sub = "";
+      for (const s of sentences) {
+        if (sub.length + s.length > BLOCK_TARGET_CHARS && sub) {
+          blocks.push(sub.trim());
+          sub = s;
+        } else {
+          sub += (sub ? " " : "") + s;
+        }
+      }
+      if (sub.trim()) blocks.push(sub.trim());
+      continue;
+    }
+
+    if (buffer.length + p.length > BLOCK_TARGET_CHARS) {
+      flushBuffer();
+    }
+    buffer += (buffer ? "\n\n" : "") + p;
+  }
+  flushBuffer();
+
+  return blocks.map((text, id) => ({ id, text }));
+}
+
+const triageSchema = z.object({
+  documentType: z.string().describe("Brief description of what kind of document this is"),
+  keepBlockIds: z.array(z.number()).describe("IDs of blocks containing actual recommendations"),
+  excludedReason: z.string().nullable().describe("Brief reason for excluding the rest"),
+});
+
+async function triageDocument(rawText: string): Promise<string> {
+  if (rawText.length < TRIAGE_MIN_LENGTH) return rawText;
+  if (rawText.length > TRIAGE_MAX_LENGTH) return rawText;
+
+  const blocks = splitIntoBlocks(rawText);
+  if (blocks.length <= 1) return rawText;
+
+  const numbered = blocks.map((b) => `[${b.id}] ${b.text}`).join("\n\n");
+
+  try {
+    const { object } = await generateObject({
+      model: openai("gpt-4o-mini"),
+      schema: triageSchema,
+      prompt: `You are analyzing a travel document to find which sections contain actual recommendations vs background reference content.
+
+KEEP sections that contain:
+- Specific places someone explicitly recommends to stay/eat/visit/do
+- Scheduled itinerary items (hotels, tours, day trips, dinners, activities)
+- Personal picks, "must-see" lists, friend's suggestions
+- Booked accommodations or scheduled experiences
+
+DISCARD sections that are:
+- Encyclopedia/history descriptions of regions or neighborhoods
+- Generic "About this area" or "A little bit of history" overviews mentioning many places as context
+- Glossaries, definitions, historical background, factual information
+- Boilerplate, page numbers, navigation, contact information, headers/footers
+
+Return the IDs of blocks to KEEP. Be selective — when in doubt, exclude. The goal is to keep only blocks that name specific places someone is recommending or has scheduled, not blocks that mention places as part of general descriptions.
+
+Document blocks:
+${numbered}`,
+    });
+
+    if (object.keepBlockIds.length === 0) return rawText;
+
+    const keepSet = new Set(object.keepBlockIds);
+    const filtered = blocks
+      .filter((b) => keepSet.has(b.id))
+      .map((b) => b.text)
+      .join("\n\n");
+
+    return filtered.trim() ? filtered : rawText;
+  } catch (err) {
+    console.error("Triage failed, falling back to full text:", err);
+    return rawText;
+  }
+}
+
 function deduplicateItems(items: ExtractedItem[]): ExtractedItem[] {
   const seen = new Map<string, ExtractedItem>();
   for (const item of items) {
@@ -231,7 +335,8 @@ async function extractItems(
   rawText: string,
   sourceUrl?: string
 ): Promise<ExtractedItem[]> {
-  const chunks = chunkText(rawText, 12000, 500);
+  const triaged = await triageDocument(rawText);
+  const chunks = chunkText(triaged, 12000, 500);
 
   const chunkResults = await Promise.all(
     chunks.map((chunk) => extractItemsFromChunk(chunk, sourceUrl))
@@ -348,11 +453,12 @@ export async function DELETE(req: Request) {
   const { searchParams } = new URL(req.url);
   const tripId = searchParams.get("tripId");
   const recId = searchParams.get("id");
+  const recommender = searchParams.get("recommender");
   const itemIndexParam = searchParams.get("itemIndex");
 
-  if (!tripId || !recId) {
+  if (!tripId || (!recId && !recommender)) {
     return Response.json(
-      { error: "tripId and id are required" },
+      { error: "tripId and either id or recommender are required" },
       { status: 400 }
     );
   }
@@ -362,13 +468,18 @@ export async function DELETE(req: Request) {
     return Response.json({ error: "Trip not found" }, { status: 404 });
   }
 
-  if (itemIndexParam != null) {
+  if (recommender && !recId) {
+    // Bulk delete: remove all recommendations from this recommender
+    trip.recommendations = (trip.recommendations || []).filter(
+      (r) => (r.recommender || "_unnamed") !== recommender
+    );
+  } else if (itemIndexParam != null && recId) {
     const idx = parseInt(itemIndexParam, 10);
     trip.recommendations = (trip.recommendations || []).map((r) => {
       if (r.id !== recId) return r;
       return { ...r, extractedItems: r.extractedItems.filter((_, i) => i !== idx) };
     }).filter((r) => r.extractedItems.length > 0 || r.status !== "ready");
-  } else {
+  } else if (recId) {
     trip.recommendations = (trip.recommendations || []).filter(
       (r) => r.id !== recId
     );

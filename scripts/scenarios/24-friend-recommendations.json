@@ -24,6 +24,7 @@
     "phaseAtLeast": "hotels",
     "minFlights": 1,
     "updateTripCalled": true,
-    "recommendationsUsed": true
+    "recommendationsUsed": true,
+    "independentResearchDone": true
   }
 }

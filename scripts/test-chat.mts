@@ -173,6 +173,8 @@ interface PlanExpectations {
   recommendationsUsed?: boolean;
   /** Expect fetch_url tool to be called at least once */
   fetchUrlUsed?: boolean;
+  /** Expect the agent did independent research (search_hotels, search_vacation_rentals, search_places, web_search, or deep_research) beyond just reading friend recs */
+  independentResearchDone?: boolean;
 }
 
 interface ScenarioSetup {
@@ -392,6 +394,20 @@ function validatePlan(plan: ReconstructedPlan, history: UIMessage[], expect?: Pl
       label: "fetch_url used",
       status: used === e.fetchUrlUsed ? "PASS" : "FAIL",
       detail: used ? `fetch_url called ${fetchCount}x` : "Not called",
+    });
+  }
+
+  if (e.independentResearchDone !== undefined) {
+    const researchTools = ["search_hotels", "search_vacation_rentals", "search_airbnb", "search_places", "web_search", "deep_research"];
+    const researchCalls = researchTools.map((t) => [t, toolCounts.get(t) || 0] as const).filter(([, c]) => c > 0);
+    const done = researchCalls.length > 0;
+    const detail = done
+      ? researchCalls.map(([t, c]) => `${t} (${c}x)`).join(", ")
+      : "No independent research tools called";
+    results.push({
+      label: "Independent research (beyond friend recs)",
+      status: done === e.independentResearchDone ? "PASS" : "FAIL",
+      detail,
     });
   }
 

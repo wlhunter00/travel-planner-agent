@@ -61,6 +61,8 @@ export interface CityStop {
   lng?: number;
 }
 
+export type RecommendationSource = "agent_research" | "friend_recommendation" | "user_choice";
+
 export interface Hotel {
   id: string;
   name: string;
@@ -81,6 +83,7 @@ export interface Hotel {
   bathrooms?: number;
   maxGuests?: number;
   totalPrice?: number;
+  recommendationSource?: RecommendationSource;
 }
 
 export interface Activity {
@@ -100,6 +103,7 @@ export interface Activity {
   bookingUrl?: string;
   notes?: string;
   sourceCitations?: { label: string; url: string }[];
+  recommendationSource?: RecommendationSource;
 }
 
 export interface DayPlan {

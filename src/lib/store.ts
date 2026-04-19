@@ -13,6 +13,7 @@ interface TripStore {
 
   addRecommendation: (rec: Recommendation) => void;
   removeRecommendation: (id: string) => void;
+  removeRecommendationGroup: (recommender: string) => void;
   removeExtractedItem: (recId: string, itemIndex: number) => void;
 }
 
@@ -78,6 +79,20 @@ export const useTripStore = create<TripStore>((set) => ({
         trip: {
           ...s.trip,
           recommendations: (s.trip.recommendations || []).filter((r) => r.id !== id),
+          updatedAt: new Date().toISOString(),
+        },
+      };
+    }),
+
+  removeRecommendationGroup: (recommender) =>
+    set((s) => {
+      if (!s.trip) return s;
+      return {
+        trip: {
+          ...s.trip,
+          recommendations: (s.trip.recommendations || []).filter(
+            (r) => (r.recommender || "_unnamed") !== recommender
+          ),
           updatedAt: new Date().toISOString(),
         },
       };

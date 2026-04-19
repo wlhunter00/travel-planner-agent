@@ -43,6 +43,20 @@ When the user asks you to **plan**, **outline**, or **book** a **multi-day** tri
 
 Prefer **batching** that **single** lodging search **together with** flight searches when both use the same date window (parallel tool calls). **Skip** lodging search if they said **flights only**, **no hotels yet**, or you have **no** date window at all. Pure **discovery** questions without dates stay research-only. **Never** fire the same lodging tool repeatedly with the same parameters in one turn; if results are empty or obviously irrelevant, note it once and move on — do not burn steps on retries.
 
+## When Friend Recommendations Exist — Comparison Protocol
+
+When friend or personal recommendations are present for the current planning category, you MUST follow this two-phase workflow:
+
+**Phase 1 — Independent research:** Before referencing any friend recommendations, run your own tool-based research for the category:
+- Hotels: \`search_hotels\` or \`search_vacation_rentals\` for the area
+- Restaurants: \`search_places\` with restaurant type + \`web_search\` for "best restaurants in [area]"
+- Activities/Attractions: \`search_places\` + \`web_search\` or \`deep_research\`
+- Neighborhoods: \`web_search\` for "best neighborhoods to stay in [city]"
+
+**Phase 2 — Mixed comparison and recommendation:** Combine your top 2–3 independent finds with the friend recommendations into a single comparison. For each option include name, location, price range, rating/reviews (from tools), and whether it came from your research or a friend. Then make an opinionated pick — it could be a friend's suggestion, your own find, or a blend. When your research independently validates a friend's pick, call that out — it strengthens confidence. When you find something clearly better, say so and explain why.
+
+Never skip Phase 1 by jumping straight to "your friend recommended X, let's go with that." The user wants your independent judgment layered on top of friend input, not a rubber stamp.
+
 ## Long-haul flight validation (multi-country / open-jaw)
 
 When the user names where they are flying **from** (metro, airport, or "flying out of X") and the trip is **international with multiple countries or an open-jaw shape**:
@@ -160,15 +174,24 @@ The tripState field accepts partial updates — only include the fields you're c
   }
 
   if (context?.recommendations) {
+    let phaseAction = "";
+    if (context.phase === "hotels") {
+      phaseAction = `\n**ACTION REQUIRED:** You have friend hotel/neighborhood recommendations below. Before discussing or comparing these, run \`search_hotels\` (or \`search_vacation_rentals\`) for the same area to build your own shortlist. Then present a mixed comparison of your finds vs the friend picks.\n`;
+    } else if (context.phase === "restaurants") {
+      phaseAction = `\n**ACTION REQUIRED:** You have friend restaurant recommendations below. Before discussing these, use \`search_places\` (type: restaurant) and \`web_search\` to find top-rated restaurants near the planned activities. Then present a mixed comparison of your finds vs the friend picks.\n`;
+    } else if (context.phase === "day_plans") {
+      phaseAction = `\n**ACTION REQUIRED:** You have friend attraction/activity recommendations below. Before building the day plan around these, research alternatives in the same neighborhoods using \`search_places\` and \`web_search\`. Then weave the best options from both sources into the itinerary.\n`;
+    }
+
     parts.push(`\n## Friend & Personal Recommendations (reference only)
 
-The user has shared recommendations from friends or personal research. These are NOT the source of truth — treat them as suggestions worth considering alongside your own research. You should:
-- Reference these when they overlap with what you find via tools
-- Compare them against alternatives (price, rating, location)
-- Feel free to recommend something different if you find a better fit
-- Note when a friend's pick aligns with what you'd independently suggest
+The user has shared recommendations from friends or personal research. These are NOT the source of truth — treat them as suggestions to validate and compare against your own independent research. You MUST:
+1. Do your own tool-based research for the category FIRST (see "Comparison Protocol" above)
+2. Build a mixed shortlist combining your finds with friend picks
+3. Make an opinionated recommendation — override friend picks when you find something better
+4. Call out when your research confirms a friend's suggestion (builds confidence)
 - Use \`get_recommendations\` to browse recommendations for other categories not shown below
-
+${phaseAction}
 ${context.recommendations}`);
   }
 
@@ -243,6 +266,8 @@ export const updateTripSchema = z.object({
             bookingUrl: z.string().optional(),
             checkIn: z.string().optional(),
             checkOut: z.string().optional(),
+            recommendationSource: z.enum(["agent_research", "friend_recommendation", "user_choice"]).optional()
+              .describe("Where this pick originated: your own research, a friend recommendation, or explicit user choice"),
           })
         )
         .optional(),
@@ -270,6 +295,8 @@ export const updateTripSchema = z.object({
                 currency: z.string().optional(),
                 bookingUrl: z.string().optional(),
                 notes: z.string().optional(),
+                recommendationSource: z.enum(["agent_research", "friend_recommendation", "user_choice"]).optional()
+                  .describe("Where this pick originated: your own research, a friend recommendation, or explicit user choice"),
               })
             ),
           })

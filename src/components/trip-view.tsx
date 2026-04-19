@@ -9,8 +9,49 @@ import { HotelCard } from "./hotel-card";
 import { DayTimeline } from "./day-timeline";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
-import { Download, FileText, Calendar, Sparkles, MapPin, UtensilsCrossed, Building2, Compass, LayoutGrid, Train, StickyNote, ExternalLink, Link, MessageSquare, X, User, Trash2 } from "lucide-react";
+import { Download, FileText, Calendar, Sparkles, MapPin, UtensilsCrossed, Building2, Compass, LayoutGrid, Train, StickyNote, ExternalLink, Link, MessageSquare, X, User, Trash2, ChevronDown } from "lucide-react";
 import type { Recommendation, RecommendationCategory, ExtractedItem, SkeletonDay, ConfirmedHotel } from "@/lib/types";
+
+function CollapsibleSection({
+  title,
+  icon: Icon,
+  badge,
+  defaultOpen = true,
+  children,
+}: {
+  title: string;
+  icon: typeof MapPin;
+  badge?: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className="border-t border-border/40">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className={`w-full flex items-center justify-between p-5 group/collapse ${open ? "pb-0" : ""}`}
+      >
+        <h3 className="text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest flex items-center gap-1.5">
+          <Icon className="size-3" />
+          {title}
+          {badge && (
+            <span className="ml-1 text-[10px] font-normal normal-case tracking-normal text-muted-foreground/50">
+              {badge}
+            </span>
+          )}
+        </h3>
+        <ChevronDown
+          className={`size-3.5 text-muted-foreground/40 transition-transform group-hover/collapse:text-muted-foreground/60 ${
+            open ? "" : "-rotate-90"
+          }`}
+        />
+      </button>
+      {open && <div className="p-5 pt-3">{children}</div>}
+    </section>
+  );
+}
 
 export function TripView() {
   const trip = useTripStore((s) => s.trip);
@@ -48,10 +89,6 @@ export function TripView() {
         <div>
           <TripHeader />
 
-          {hasRecs && (
-            <RecommendationsSection recs={allRecs} tripId={trip.id} />
-          )}
-
           {!hasContent && !hasRecs && (
             <div className="px-6 py-12 text-center text-muted-foreground animate-fade-up">
               <div className="text-5xl mb-4 opacity-60">🗺️</div>
@@ -65,13 +102,9 @@ export function TripView() {
           )}
 
           {hasNotes && (
-            <section className="p-5 border-t border-border/40">
-              <h3 className="text-[11px] font-semibold mb-3 text-muted-foreground/60 uppercase tracking-widest flex items-center gap-1.5">
-                <StickyNote className="size-3" />
-                Notes
-              </h3>
+            <CollapsibleSection title="Notes" icon={StickyNote}>
               <p className="text-sm text-foreground/80 leading-relaxed">{state.notes}</p>
-            </section>
+            </CollapsibleSection>
           )}
 
           {hasRoute && !hasCities && (
@@ -91,23 +124,17 @@ export function TripView() {
           )}
 
           {hasFlights && (
-            <section className="p-5">
-              <h3 className="text-[11px] font-semibold mb-3 text-muted-foreground/60 uppercase tracking-widest">
-                Flights
-              </h3>
+            <CollapsibleSection title="Flights" icon={MapPin}>
               <div className="space-y-2.5">
                 {state.flights.map((f) => (
                   <FlightCard key={f.id} flight={f} />
                 ))}
               </div>
-            </section>
+            </CollapsibleSection>
           )}
 
           {hasCities && (
-            <section className="p-5 border-t border-border/40">
-              <h3 className="text-[11px] font-semibold mb-3 text-muted-foreground/60 uppercase tracking-widest">
-                Route
-              </h3>
+            <CollapsibleSection title="Route" icon={Train}>
               <div className="flex flex-wrap gap-2">
                 {state.cities.map((city, i) => (
                   <div key={city.id} className="flex items-center gap-2">
@@ -121,40 +148,35 @@ export function TripView() {
                   </div>
                 ))}
               </div>
-            </section>
+            </CollapsibleSection>
           )}
 
           {hasHotels && (
-            <section className="p-5 border-t border-border/40">
-              <h3 className="text-[11px] font-semibold mb-3 text-muted-foreground/60 uppercase tracking-widest">
-                Accommodations
-              </h3>
+            <CollapsibleSection title="Accommodations" icon={Building2}>
               <div className="grid grid-cols-1 gap-2.5">
                 {state.hotels.map((h) => (
                   <HotelCard key={h.id} hotel={h} />
                 ))}
               </div>
-            </section>
+            </CollapsibleSection>
           )}
 
           {hasDays && (
-            <section className="p-5 border-t border-border/40">
-              <h3 className="text-[11px] font-semibold mb-4 text-muted-foreground/60 uppercase tracking-widest">
-                Day Plans
-              </h3>
+            <CollapsibleSection title="Day Plans" icon={Calendar}>
               <div className="space-y-7">
                 {state.days.map((day) => (
                   <DayTimeline key={day.id} day={day} cityName={cityMap[day.cityId]} />
                 ))}
               </div>
-            </section>
+            </CollapsibleSection>
+          )}
+
+          {hasRecs && (
+            <RecommendationsSection recs={allRecs} tripId={trip.id} />
           )}
 
           {hasContent && (
-            <section className="p-5 border-t border-border/40">
-              <h3 className="text-[11px] font-semibold mb-3 text-muted-foreground/60 uppercase tracking-widest">
-                Export
-              </h3>
+            <CollapsibleSection title="Export" icon={Download}>
               <div className="flex gap-2">
                 <Button
                   variant="outline"
@@ -184,7 +206,7 @@ export function TripView() {
                   iCal
                 </Button>
               </div>
-            </section>
+            </CollapsibleSection>
           )}
         </div>
       </ScrollArea>
@@ -202,10 +224,7 @@ function RouteOverview({
   timings?: Record<string, string>;
 }) {
   return (
-    <section className="p-5 border-t border-border/40">
-      <h3 className="text-[11px] font-semibold mb-3 text-muted-foreground/60 uppercase tracking-widest">
-        Route
-      </h3>
+    <CollapsibleSection title="Route" icon={Train}>
       <div className="flex flex-wrap items-center gap-2">
         {order.map((city, i) => (
           <div key={city} className="flex items-center gap-2">
@@ -235,7 +254,7 @@ function RouteOverview({
           ))}
         </div>
       )}
-    </section>
+    </CollapsibleSection>
   );
 }
 
@@ -250,10 +269,7 @@ function ItinerarySkeletonSection({ days }: { days: SkeletonDay[] }) {
   };
 
   return (
-    <section className="p-5 border-t border-border/40">
-      <h3 className="text-[11px] font-semibold mb-4 text-muted-foreground/60 uppercase tracking-widest">
-        Itinerary Overview
-      </h3>
+    <CollapsibleSection title="Itinerary Overview" icon={Calendar}>
       <div className="space-y-0">
         {days.map((day, i) => (
           <div key={day.date} className="flex gap-3 group">
@@ -271,16 +287,13 @@ function ItinerarySkeletonSection({ days }: { days: SkeletonDay[] }) {
           </div>
         ))}
       </div>
-    </section>
+    </CollapsibleSection>
   );
 }
 
 function ConfirmedLodgingSection({ hotels }: { hotels: Record<string, ConfirmedHotel> }) {
   return (
-    <section className="p-5 border-t border-border/40">
-      <h3 className="text-[11px] font-semibold mb-3 text-muted-foreground/60 uppercase tracking-widest">
-        Accommodations
-      </h3>
+    <CollapsibleSection title="Accommodations" icon={Building2}>
       <div className="grid grid-cols-1 gap-2.5">
         {Object.entries(hotels).map(([city, hotel]) => (
           <div
@@ -309,7 +322,7 @@ function ConfirmedLodgingSection({ hotels }: { hotels: Record<string, ConfirmedH
           </div>
         ))}
       </div>
-    </section>
+    </CollapsibleSection>
   );
 }
 
@@ -447,19 +460,22 @@ function RecGroupCard({
   filteredItems,
   onRemoveRec,
   onRemoveItem,
+  onRemoveGroup,
 }: {
   group: RecGroup;
   filteredItems: TaggedItem[];
   onRemoveRec: (recId: string) => void;
   onRemoveItem: (recId: string, itemIndex: number) => void;
+  onRemoveGroup: (recommender: string) => void;
 }) {
   const hasName = group.recommender !== "_unnamed";
   const processingRecs = group.recs.filter((r) => r.status === "processing");
   const errorRecs = group.recs.filter((r) => r.status === "error");
   const emptyRecs = group.recs.filter((r) => r.status === "ready" && r.extractedItems.length === 0);
+  const groupLabel = hasName ? `${group.recommender}'s picks` : "this group";
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 group/group">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 min-w-0 flex-wrap">
           {hasName && (
@@ -472,6 +488,23 @@ function RecGroupCard({
             {group.taggedItems.length} item{group.taggedItems.length !== 1 ? "s" : ""}
           </span>
         </div>
+        <button
+          type="button"
+          onClick={() => {
+            if (
+              group.taggedItems.length > 5 &&
+              !confirm(`Delete all ${group.taggedItems.length} picks from ${groupLabel}? This cannot be undone.`)
+            ) {
+              return;
+            }
+            onRemoveGroup(group.recommender);
+          }}
+          className="opacity-0 group-hover/group:opacity-100 shrink-0 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground/60 hover:text-destructive hover:bg-destructive/10 transition-all"
+          aria-label={`Delete all picks from ${groupLabel}`}
+          title={`Delete all picks from ${groupLabel}`}
+        >
+          <Trash2 className="size-3" />
+        </button>
       </div>
 
       {processingRecs.length > 0 && (
@@ -539,6 +572,7 @@ function RecommendationsSection({
   tripId: string;
 }) {
   const removeRecommendation = useTripStore((s) => s.removeRecommendation);
+  const removeRecommendationGroup = useTripStore((s) => s.removeRecommendationGroup);
   const removeExtractedItem = useTripStore((s) => s.removeExtractedItem);
   const [activeFilter, setActiveFilter] = useState<RecommendationCategory | "all">("all");
 
@@ -564,20 +598,20 @@ function RecommendationsSection({
     });
   }
 
-  return (
-    <section className="p-5 border-t border-border/40">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-[11px] font-semibold text-muted-foreground/60 uppercase tracking-widest flex items-center gap-1.5">
-          <Sparkles className="size-3" />
-          Friend Recommendations
-        </h3>
-        <span className="text-[10px] text-muted-foreground/50">
-          {totalItems > 0
-            ? `${totalItems} item${totalItems !== 1 ? "s" : ""}`
-            : `${recs.length} source${recs.length !== 1 ? "s" : ""}`}
-        </span>
-      </div>
+  async function handleRemoveGroup(recommender: string) {
+    removeRecommendationGroup(recommender);
+    await fetch(
+      `/api/recommendations?tripId=${tripId}&recommender=${encodeURIComponent(recommender)}`,
+      { method: "DELETE" }
+    );
+  }
 
+  const badge = totalItems > 0
+    ? `${totalItems} item${totalItems !== 1 ? "s" : ""}`
+    : `${recs.length} source${recs.length !== 1 ? "s" : ""}`;
+
+  return (
+    <CollapsibleSection title="Friend Recommendations" icon={Sparkles} badge={badge}>
       {allCategories.length > 1 && (
         <div className="flex flex-wrap gap-1.5 mb-3">
           <button
@@ -629,10 +663,11 @@ function RecommendationsSection({
               filteredItems={filtered}
               onRemoveRec={handleRemoveRec}
               onRemoveItem={handleRemoveItem}
+              onRemoveGroup={handleRemoveGroup}
             />
           );
         })}
       </div>
-    </section>
+    </CollapsibleSection>
   );
 }
