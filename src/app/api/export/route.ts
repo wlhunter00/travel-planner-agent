@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 import { getTrip } from "@/lib/trips-store";
+import { requireAuth } from "@/lib/api-auth";
 import { createEvents, type EventAttributes } from "ics";
 
 export async function GET(req: Request) {
+  const { userId, error } = await requireAuth();
+  if (error) return error;
+
   const { searchParams } = new URL(req.url);
   const tripId = searchParams.get("tripId");
   const format = searchParams.get("format") || "json";
@@ -11,7 +15,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Missing tripId" }, { status: 400 });
   }
 
-  const trip = await getTrip(tripId);
+  const trip = await getTrip(tripId, userId);
   if (!trip) {
     return NextResponse.json({ error: "Trip not found" }, { status: 404 });
   }

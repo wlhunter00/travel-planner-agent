@@ -1,46 +1,59 @@
 import { NextResponse } from "next/server";
 import { listTrips, saveTrip, getTrip, deleteTrip } from "@/lib/trips-store";
 import { createNewTrip } from "@/lib/types";
+import { requireAuth } from "@/lib/api-auth";
 import { v4 as uuidv4 } from "uuid";
 
 export async function GET(req: Request) {
+  const { userId, error } = await requireAuth();
+  if (error) return error;
+
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");
   if (id) {
-    const trip = await getTrip(id);
+    const trip = await getTrip(id, userId);
     if (!trip) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
     return NextResponse.json(trip);
   }
-  const trips = await listTrips();
+  const trips = await listTrips(userId);
   return NextResponse.json(trips);
 }
 
 export async function POST(req: Request) {
+  const { userId, error } = await requireAuth();
+  if (error) return error;
+
   const body = await req.json().catch(() => ({}));
   const id = uuidv4();
   const trip = createNewTrip(id);
   if (body.name) trip.name = body.name;
-  await saveTrip(trip);
+  await saveTrip(trip, userId);
   return NextResponse.json(trip, { status: 201 });
 }
 
 export async function PUT(req: Request) {
+  const { userId, error } = await requireAuth();
+  if (error) return error;
+
   const trip = await req.json();
   if (!trip?.id) {
     return NextResponse.json({ error: "Missing trip id" }, { status: 400 });
   }
-  await saveTrip(trip);
+  await saveTrip(trip, userId);
   return NextResponse.json({ ok: true });
 }
 
 export async function DELETE(req: Request) {
+  const { userId, error } = await requireAuth();
+  if (error) return error;
+
   const { searchParams } = new URL(req.url);
   const id = searchParams.get("id");
   if (!id) {
     return NextResponse.json({ error: "Missing id" }, { status: 400 });
   }
-  await deleteTrip(id);
+  await deleteTrip(id, userId);
   return NextResponse.json({ ok: true });
 }

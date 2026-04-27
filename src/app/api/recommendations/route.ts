@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getTrip, saveTrip } from "@/lib/trips-store";
 import { fetchUrlContent } from "@/lib/tools/exa";
 import { searchPlaces, getPlaceDetails } from "@/lib/tools/google-places";
+import { requireAuth } from "@/lib/api-auth";
 import type { Recommendation, ExtractedItem } from "@/lib/types";
 import { v4 as uuid } from "uuid";
 
@@ -537,6 +538,9 @@ async function enrichItemsViaPlaces(items: ExtractedItem[]): Promise<ExtractedIt
 
 export async function POST(req: Request) {
   try {
+    const { userId, error } = await requireAuth();
+    if (error) return error;
+
     const body = await req.json();
     const { tripId, type, content, recommender } = body as {
       tripId: string;
@@ -552,7 +556,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const trip = await getTrip(tripId);
+    const trip = await getTrip(tripId, userId);
     if (!trip) {
       return Response.json({ error: "Trip not found" }, { status: 404 });
     }
@@ -583,7 +587,7 @@ export async function POST(req: Request) {
     if (!trip.recommendations) trip.recommendations = [];
     trip.recommendations.push(rec);
     trip.updatedAt = new Date().toISOString();
-    await saveTrip(trip);
+    await saveTrip(trip, userId);
 
     return Response.json(rec);
   } catch (err) {
@@ -596,6 +600,9 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+  const { userId, error } = await requireAuth();
+  if (error) return error;
+
   const { searchParams } = new URL(req.url);
   const tripId = searchParams.get("tripId");
   const recId = searchParams.get("id");
@@ -609,7 +616,7 @@ export async function DELETE(req: Request) {
     );
   }
 
-  const trip = await getTrip(tripId);
+  const trip = await getTrip(tripId, userId);
   if (!trip) {
     return Response.json({ error: "Trip not found" }, { status: 404 });
   }
@@ -634,13 +641,16 @@ export async function DELETE(req: Request) {
   }
 
   trip.updatedAt = new Date().toISOString();
-  await saveTrip(trip);
+  await saveTrip(trip, userId);
 
   return Response.json({ success: true });
 }
 
 export async function PATCH(req: Request) {
   try {
+    const { userId, error } = await requireAuth();
+    if (error) return error;
+
     const { tripId, recommender, priority } = (await req.json()) as {
       tripId: string;
       recommender: string;
@@ -661,7 +671,7 @@ export async function PATCH(req: Request) {
       );
     }
 
-    const trip = await getTrip(tripId);
+    const trip = await getTrip(tripId, userId);
     if (!trip) {
       return Response.json({ error: "Trip not found" }, { status: 404 });
     }
@@ -669,7 +679,7 @@ export async function PATCH(req: Request) {
     if (!trip.recommenderPriorities) trip.recommenderPriorities = {};
     trip.recommenderPriorities[recommender] = priority;
     trip.updatedAt = new Date().toISOString();
-    await saveTrip(trip);
+    await saveTrip(trip, userId);
 
     return Response.json({ success: true });
   } catch (err) {
