@@ -21,8 +21,41 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Travel Planner",
-  description: "AI-powered travel planning assistant",
+  metadataBase: new URL("https://travel-planner-agent-nine.vercel.app"),
+  title: {
+    default: "Travel Planner",
+    template: "%s · Travel Planner",
+  },
+  description:
+    "Plan trips with an AI co-pilot — turn loose ideas into day-by-day itineraries, with picks tuned to how you like to travel.",
+  applicationName: "Travel Planner",
+  keywords: [
+    "travel planner",
+    "AI travel assistant",
+    "trip planning",
+    "itinerary",
+    "travel recommendations",
+  ],
+  authors: [{ name: "Travel Planner" }],
+  openGraph: {
+    type: "website",
+    siteName: "Travel Planner",
+    title: "Travel Planner",
+    description:
+      "Plan trips with an AI co-pilot — turn loose ideas into day-by-day itineraries, with picks tuned to how you like to travel.",
+    url: "/",
+    locale: "en_US",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Travel Planner",
+    description:
+      "Plan trips with an AI co-pilot — turn loose ideas into day-by-day itineraries.",
+  },
+  robots: {
+    index: true,
+    follow: true,
+  },
 };
 
 export default function RootLayout({
