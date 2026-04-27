@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { TripCard } from "./trip-card";
 import { Button } from "@/components/ui/button";
+import { UserMenu } from "./user-menu";
 import type { Phase, TripStatus } from "@/lib/types";
 import { Plus, Compass } from "lucide-react";
 
@@ -48,6 +49,9 @@ export function TripList() {
       <header className="relative overflow-hidden border-b border-border/50">
         <div className="absolute inset-0 bg-linear-to-br from-primary/5 via-transparent to-warm-amber/5" />
         <div className="relative max-w-6xl mx-auto px-6 pt-16 pb-12">
+          <div className="absolute top-4 right-6">
+            <UserMenu />
+          </div>
           <div className="animate-fade-up">
             <p className="text-xs font-medium uppercase tracking-[0.2em] text-primary/70 mb-3">
               Travel Planner

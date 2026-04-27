@@ -1,69 +1,36 @@
-import fs from "fs/promises";
-import path from "path";
+import { prisma } from "./prisma";
+import {
+  emptyPreferences,
+  type UserPreferences,
+  type PastTrip,
+} from "./preferences-types";
 
-const DATA_DIR = path.join(process.cwd(), ".travel-planner");
-const PREFS_PATH = path.join(DATA_DIR, "preferences.json");
+export { emptyPreferences };
+export type { UserPreferences, PastTrip };
 
-export interface UserPreferences {
-  travelStyle: string[];
-  accommodationStyle: string[];
-  cuisinePreferences: string[];
-  dietaryRestrictions: string[];
-  activityInterests: string[];
-  transportPreference: string[];
-  avoids: string[];
-  airlinePreferences: string[];
-  budgetRange: string;
-  splurgeCategories: string[];
-  saveCategories: string[];
-  pastTrips: PastTrip[];
-  lastUpdated: string;
+export async function getPreferences(userId: string): Promise<UserPreferences | null> {
+  const row = await prisma.preferences.findUnique({ where: { userId } });
+  if (!row) return null;
+  return row.data as unknown as UserPreferences;
 }
 
-export interface PastTrip {
-  destination: string;
-  dates: string;
-  loved: string[];
-  wouldSkip: string[];
-}
-
-export function emptyPreferences(): UserPreferences {
-  return {
-    travelStyle: [],
-    accommodationStyle: [],
-    cuisinePreferences: [],
-    dietaryRestrictions: [],
-    activityInterests: [],
-    transportPreference: [],
-    avoids: [],
-    airlinePreferences: [],
-    budgetRange: "",
-    splurgeCategories: [],
-    saveCategories: [],
-    pastTrips: [],
-    lastUpdated: new Date().toISOString(),
-  };
-}
-
-export async function getPreferences(): Promise<UserPreferences | null> {
-  try {
-    const data = await fs.readFile(PREFS_PATH, "utf-8");
-    return JSON.parse(data);
-  } catch {
-    return null;
-  }
-}
-
-export async function savePreferences(prefs: UserPreferences): Promise<void> {
-  await fs.mkdir(DATA_DIR, { recursive: true });
+export async function savePreferences(
+  userId: string,
+  prefs: UserPreferences,
+): Promise<void> {
   prefs.lastUpdated = new Date().toISOString();
-  await fs.writeFile(PREFS_PATH, JSON.stringify(prefs, null, 2));
+  await prisma.preferences.upsert({
+    where: { userId },
+    update: { data: prefs as unknown as object },
+    create: { userId, data: prefs as unknown as object },
+  });
 }
 
 export async function updatePreferences(
-  updates: Partial<UserPreferences>
+  userId: string,
+  updates: Partial<UserPreferences>,
 ): Promise<UserPreferences> {
-  const existing = (await getPreferences()) || emptyPreferences();
+  const existing = (await getPreferences(userId)) ?? emptyPreferences();
 
   for (const [key, value] of Object.entries(updates)) {
     if (key === "lastUpdated") continue;
@@ -76,6 +43,6 @@ export async function updatePreferences(
     }
   }
 
-  await savePreferences(existing);
+  await savePreferences(userId, existing);
   return existing;
 }

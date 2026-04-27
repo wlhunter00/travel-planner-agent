@@ -1,20 +1,7 @@
-import type { Trip } from "./types";
-import fs from "fs/promises";
-import path from "path";
+import type { Trip, TripState, ChatMessage, Recommendation } from "./types";
+import { prisma } from "./prisma";
 
-const DATA_DIR = path.join(process.cwd(), ".travel-planner", "trips");
-
-async function ensureDir() {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-}
-
-function tripPath(id: string) {
-  return path.join(DATA_DIR, `${id}.json`);
-}
-
-const INDEX_PATH = path.join(DATA_DIR, "index.json");
-
-interface TripIndex {
+export interface TripIndex {
   id: string;
   name: string;
   status: string;
@@ -27,71 +14,81 @@ interface TripIndex {
   updatedAt: string;
 }
 
-async function readIndex(): Promise<TripIndex[]> {
-  try {
-    const data = await fs.readFile(INDEX_PATH, "utf-8");
-    return JSON.parse(data);
-  } catch {
-    return [];
-  }
+export async function listTrips(userId: string): Promise<TripIndex[]> {
+  const rows = await prisma.trip.findMany({
+    where: { userId },
+    orderBy: { updatedAt: "desc" },
+    select: {
+      id: true,
+      name: true,
+      status: true,
+      phase: true,
+      destination: true,
+      startDate: true,
+      endDate: true,
+      coverImage: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    status: r.status,
+    phase: r.phase,
+    destination: r.destination,
+    startDate: r.startDate,
+    endDate: r.endDate,
+    coverImage: r.coverImage ?? undefined,
+    createdAt: r.createdAt.toISOString(),
+    updatedAt: r.updatedAt.toISOString(),
+  }));
 }
 
-async function writeIndex(index: TripIndex[]) {
-  await ensureDir();
-  await fs.writeFile(INDEX_PATH, JSON.stringify(index, null, 2));
-}
-
-function tripToIndexEntry(trip: Trip): TripIndex {
+export async function getTrip(id: string, userId: string): Promise<Trip | null> {
+  const row = await prisma.trip.findFirst({ where: { id, userId } });
+  if (!row) return null;
   return {
-    id: trip.id,
+    id: row.id,
+    name: row.name,
+    status: row.status as Trip["status"],
+    phase: row.phase as Trip["phase"],
+    destination: row.destination,
+    startDate: row.startDate,
+    endDate: row.endDate,
+    coverImage: row.coverImage ?? undefined,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    state: (row.state as unknown as TripState) ?? ({} as TripState),
+    chatHistory: ((row.chatHistory as unknown) as ChatMessage[]) ?? [],
+    recommendations: ((row.recommendations as unknown) as Recommendation[]) ?? [],
+    recommenderPriorities:
+      ((row.recommenderPriorities as unknown) as Record<string, number>) ?? {},
+  };
+}
+
+export async function saveTrip(trip: Trip, userId: string): Promise<void> {
+  const data = {
     name: trip.name,
     status: trip.status,
     phase: trip.phase,
     destination: trip.destination,
     startDate: trip.startDate,
     endDate: trip.endDate,
-    coverImage: trip.coverImage,
-    createdAt: trip.createdAt,
-    updatedAt: trip.updatedAt,
+    coverImage: trip.coverImage ?? null,
+    state: trip.state as unknown as object,
+    chatHistory: (trip.chatHistory ?? []) as unknown as object,
+    recommendations: (trip.recommendations ?? []) as unknown as object,
+    recommenderPriorities: (trip.recommenderPriorities ?? {}) as unknown as object,
   };
+
+  await prisma.trip.upsert({
+    where: { id: trip.id },
+    update: data,
+    create: { id: trip.id, userId, ...data },
+  });
 }
 
-export async function listTrips(): Promise<TripIndex[]> {
-  return readIndex();
-}
-
-export async function getTrip(id: string): Promise<Trip | null> {
-  try {
-    const data = await fs.readFile(tripPath(id), "utf-8");
-    const trip = JSON.parse(data);
-    if (!trip.recommendations) trip.recommendations = [];
-    return trip;
-  } catch {
-    return null;
-  }
-}
-
-export async function saveTrip(trip: Trip): Promise<void> {
-  await ensureDir();
-  await fs.writeFile(tripPath(trip.id), JSON.stringify(trip, null, 2));
-
-  const index = await readIndex();
-  const existing = index.findIndex((t) => t.id === trip.id);
-  const entry = tripToIndexEntry(trip);
-  if (existing >= 0) {
-    index[existing] = entry;
-  } else {
-    index.unshift(entry);
-  }
-  await writeIndex(index);
-}
-
-export async function deleteTrip(id: string): Promise<void> {
-  try {
-    await fs.unlink(tripPath(id));
-  } catch {
-    // file may not exist
-  }
-  const index = await readIndex();
-  await writeIndex(index.filter((t) => t.id !== id));
+export async function deleteTrip(id: string, userId: string): Promise<void> {
+  await prisma.trip.deleteMany({ where: { id, userId } });
 }

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { DM_Sans, Instrument_Serif, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { AuthSessionProvider } from "@/components/session-provider";
 
 const dmSans = DM_Sans({
   variable: "--font-sans",
@@ -34,7 +35,7 @@ export default function RootLayout({
       <body
         className={`${dmSans.variable} ${instrumentSerif.variable} ${geistMono.variable} antialiased grain`}
       >
-        {children}
+        <AuthSessionProvider>{children}</AuthSessionProvider>
       </body>
     </html>
   );
