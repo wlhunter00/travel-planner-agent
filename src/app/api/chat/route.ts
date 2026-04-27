@@ -3,6 +3,7 @@ import { streamText, stepCountIs, convertToModelMessages, type UIMessage } from 
 import { buildSystemPrompt } from "@/lib/agent";
 import { getTrip } from "@/lib/trips-store";
 import { getPreferences, type UserPreferences } from "@/lib/preferences-store";
+import { requireAuth } from "@/lib/api-auth";
 import { searchFlights, searchMultiCityFlights } from "@/lib/tools/kiwi";
 import { searchHotels } from "@/lib/tools/serpapi-hotels";
 import { searchVacationRentals } from "@/lib/tools/vacation-rentals";
@@ -268,11 +269,14 @@ function formatRecommendations(
 }
 
 export async function POST(req: Request) {
+  const { userId, error } = await requireAuth();
+  if (error) return error;
+
   const { messages: rawMessages, tripId } = await req.json();
   const messages = sanitizeMessagesForStatelessRequest(rawMessages);
 
-  const trip = tripId ? await getTrip(tripId) : null;
-  const preferences = await getPreferences();
+  const trip = tripId ? await getTrip(tripId, userId) : null;
+  const preferences = await getPreferences(userId);
 
   const recsText = trip?.recommendations?.length
     ? formatRecommendations(trip.recommendations, trip.phase as Phase | undefined, trip.recommenderPriorities)
@@ -501,7 +505,7 @@ export async function POST(req: Request) {
         saveCategories: z.array(z.string()).optional(),
       }),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      execute: async (args: any) => updatePreferencesTool(args),
+      execute: async (args: any) => updatePreferencesTool(userId, args),
     },
 
     save_trip_summary: {
@@ -514,7 +518,7 @@ export async function POST(req: Request) {
         wouldSkip: z.array(z.string()).describe("Things the user would skip next time"),
       }),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      execute: async (args: any) => saveTripSummaryTool(args),
+      execute: async (args: any) => saveTripSummaryTool(userId, args),
     },
 
     push_to_wanderlog: {
