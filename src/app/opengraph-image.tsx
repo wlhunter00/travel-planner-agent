@@ -1,7 +1,7 @@
 import { ImageResponse } from "next/og";
 
 export const alt =
-  "Travel Planner — plan trips with an AI co-pilot, from loose idea to day-by-day itinerary.";
+  "Travel Planner — an AI co-pilot for itineraries.";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -14,90 +14,72 @@ export default function OpengraphImage() {
           height: "100%",
           display: "flex",
           flexDirection: "column",
-          justifyContent: "space-between",
-          padding: "80px",
-          background:
-            "linear-gradient(135deg, #d97a4a 0%, #c2410c 55%, #7c2d0a 100%)",
-          color: "#fdf6e8",
-          fontFamily: "sans-serif",
+          background: "#f3e9d6",
+          padding: "70px",
+          fontFamily: "serif",
+          color: "#2a1810",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
-          <div
-            style={{
-              width: "72px",
-              height: "72px",
-              borderRadius: "16px",
-              background: "rgba(253, 246, 232, 0.12)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              border: "1px solid rgba(253, 246, 232, 0.25)",
-            }}
-          >
-            <svg width="44" height="44" viewBox="0 0 32 32">
-              <path
-                d="M5 13 L25 16 L13 19 L11 25 L9 18 Z"
-                fill="#fdf6e8"
-              />
-              <path d="M13 19 L11 25 L15 21 Z" fill="#f4e4c1" />
-            </svg>
-          </div>
-          <div
-            style={{
-              fontSize: "26px",
-              fontWeight: 500,
-              letterSpacing: "0.02em",
-              opacity: 0.9,
-            }}
-          >
-            Travel Planner
-          </div>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            textTransform: "uppercase",
+            letterSpacing: "0.32em",
+            fontSize: "18px",
+            color: "#8a4a2c",
+            fontFamily: "sans-serif",
+          }}
+        >
+          <div style={{ display: "flex" }}>Travel Planner</div>
+          <div style={{ display: "flex" }}>Vol. 01 — MMXXVI</div>
         </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+        <div
+          style={{
+            display: "flex",
+            height: "2px",
+            background: "#8a4a2c",
+            marginTop: "20px",
+          }}
+        />
+        <div
+          style={{
+            flex: 1,
+            display: "flex",
+            alignItems: "flex-end",
+            paddingBottom: "30px",
+          }}
+        >
           <div
             style={{
-              fontSize: "92px",
-              lineHeight: 1.05,
-              fontWeight: 400,
+              fontSize: "100px",
               fontStyle: "italic",
-              fontFamily: "serif",
-              letterSpacing: "-0.02em",
-              maxWidth: "900px",
+              lineHeight: 1,
+              letterSpacing: "-0.03em",
+              maxWidth: "980px",
+              display: "flex",
             }}
           >
-            From loose idea to itinerary, in minutes.
-          </div>
-          <div
-            style={{
-              fontSize: "30px",
-              opacity: 0.82,
-              maxWidth: "820px",
-              lineHeight: 1.35,
-            }}
-          >
-            Plan trips with an AI co-pilot — picks tuned to how you like to
-            travel, organised day by day.
+            The slowest part of any trip is figuring out where to go.
           </div>
         </div>
-
         <div
           style={{
             display: "flex",
             justifyContent: "space-between",
             alignItems: "flex-end",
-            fontSize: "22px",
-            opacity: 0.7,
+            borderTop: "1px solid #c9a888",
+            paddingTop: "20px",
+            fontSize: "20px",
+            color: "#5a3a25",
+            fontFamily: "sans-serif",
+            letterSpacing: "0.04em",
           }}
         >
-          <div>travel-planner-agent-nine.vercel.app</div>
-          <div style={{ display: "flex", gap: "16px" }}>
-            <span>Itineraries</span>
-            <span>·</span>
-            <span>Recommendations</span>
-            <span>·</span>
-            <span>AI chat</span>
+          <div style={{ display: "flex" }}>An AI co-pilot for itineraries</div>
+          <div style={{ display: "flex" }}>
+            travel-planner-agent-nine.vercel.app
           </div>
         </div>
       </div>
