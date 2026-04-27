@@ -2,7 +2,7 @@
 
 import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
-import { Compass } from "lucide-react";
+import { Logo } from "@/components/logo";
 import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 
@@ -22,9 +22,7 @@ function SignInContent() {
     <div className="min-h-screen flex items-center justify-center px-6">
       <div className="w-full max-w-sm rounded-xl border border-border/50 bg-card/50 backdrop-blur p-8 shadow-sm">
         <div className="flex flex-col items-center text-center">
-          <div className="size-12 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-            <Compass className="size-6 text-primary" />
-          </div>
+          <Logo className="size-12 mb-4 rounded-xl shadow-md" />
           <p className="text-xs font-medium uppercase tracking-[0.2em] text-primary/70 mb-2">
             Travel Planner
           </p>

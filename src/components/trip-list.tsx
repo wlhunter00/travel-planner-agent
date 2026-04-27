@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import { TripCard } from "./trip-card";
 import { Button } from "@/components/ui/button";
 import { UserMenu } from "./user-menu";
+import { Logo } from "./logo";
 import type { Phase, TripStatus } from "@/lib/types";
-import { Plus, Compass } from "lucide-react";
+import { Plus } from "lucide-react";
 
 interface TripIndexEntry {
   id: string;
@@ -53,9 +54,12 @@ export function TripList() {
             <UserMenu />
           </div>
           <div className="animate-fade-up">
-            <p className="text-xs font-medium uppercase tracking-[0.2em] text-primary/70 mb-3">
-              Travel Planner
-            </p>
+            <div className="flex items-center gap-2.5 mb-3">
+              <Logo className="size-6 shrink-0 rounded-md shadow-sm" />
+              <p className="text-xs font-medium uppercase tracking-[0.2em] text-primary/70">
+                Travel Planner
+              </p>
+            </div>
             <h1 className="font-serif text-5xl lg:text-6xl tracking-tight text-foreground">
               Your Journeys
             </h1>
@@ -84,9 +88,7 @@ export function TripList() {
 
         {!loading && trips.length === 0 && (
           <div className="text-center py-24 animate-fade-up">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 mb-5">
-              <Compass className="size-7 text-primary" />
-            </div>
+            <Logo className="size-14 mx-auto mb-5 rounded-xl shadow-md" />
             <p className="font-serif text-2xl mb-2">No trips yet</p>
             <p className="text-muted-foreground mb-8 max-w-xs mx-auto">
               Start planning your next adventure.
