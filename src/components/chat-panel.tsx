@@ -164,10 +164,10 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
     }
   }, [messages.length]);
 
-  const saveChat = useCallback(async () => {
-    if (!trip || messages.length === 0) return;
+  const buildSavePayload = useCallback(() => {
+    if (!trip || messages.length === 0) return null;
     const latestTrip = useTripStore.getState().trip;
-    const payload = {
+    return {
       ...trip,
       ...latestTrip,
       chatHistory: messages.map((m) => ({
@@ -181,19 +181,77 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
       })),
       updatedAt: new Date().toISOString(),
     };
-    await fetch("/api/trips", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
   }, [trip, messages]);
 
-  useEffect(() => {
-    if (status === "ready" && messages.length > 0) {
-      const timer = setTimeout(saveChat, 1000);
-      return () => clearTimeout(timer);
+  const saveChat = useCallback(async () => {
+    const payload = buildSavePayload();
+    if (!payload) return;
+    const body = JSON.stringify(payload);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await fetch("/api/trips", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body,
+        });
+        if (res.ok) return;
+        if (res.status === 413 || attempt === 1) {
+          console.warn("[chat-persist] save failed", { status: res.status });
+          return;
+        }
+      } catch (e) {
+        if (attempt === 1) {
+          console.warn("[chat-persist] save error", e);
+          return;
+        }
+      }
+      await new Promise((r) => setTimeout(r, 500));
     }
+  }, [buildSavePayload]);
+
+  // null sentinel so the streaming→ready transition is detected on the first
+  // post-mount status change, not pre-empted by `prev === status` from frame zero.
+  const prevStatusRef = useRef<typeof status | null>(null);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = status;
+    if (status !== "ready" || messages.length === 0) return;
+
+    // Streaming just finished — flush immediately, this is the danger boundary.
+    if (prev === "streaming" || prev === "submitted") {
+      void saveChat();
+      return;
+    }
+    const timer = setTimeout(saveChat, 250);
+    return () => clearTimeout(timer);
   }, [status, messages.length, saveChat]);
+
+  useEffect(() => {
+    const handler = () => {
+      const payload = buildSavePayload();
+      if (!payload) return;
+      const body = JSON.stringify(payload);
+      // keepalive supports PUT and survives unload but caps at ~64KB on most
+      // browsers. Surface the case so we know if the unload path is viable.
+      if (body.length > 60_000) {
+        console.warn("[chat-persist] beforeunload payload exceeds keepalive cap", {
+          bodyKB: Math.round(body.length / 1024),
+        });
+      }
+      try {
+        fetch("/api/trips", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body,
+          keepalive: true,
+        });
+      } catch {
+        // best-effort; nothing more we can do during unload
+      }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [buildSavePayload]);
 
   const lastMessage = messages[messages.length - 1];
 

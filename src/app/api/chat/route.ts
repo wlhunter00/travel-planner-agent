@@ -20,61 +20,9 @@ import { pushToWanderlog } from "@/lib/tools/wanderlog/push-to-wanderlog";
 import { z } from "zod";
 import type { Tool } from "ai";
 import type { Recommendation, Phase, RecommendationCategory } from "@/lib/types";
+import { sanitizeMessagesForStatelessRequest, topNLargestToolResults } from "@/lib/chat-context";
 
 export const maxDuration = 300;
-
-/**
- * Recursively replace photoUrl string values with "[photo]" to reduce token
- * bloat in historical tool results sent back to the model. The UI retains
- * the original URLs — this only affects the model's view on subsequent turns.
- */
-function stripPhotoUrls(obj: unknown): unknown {
-  if (Array.isArray(obj)) return obj.map(stripPhotoUrls);
-  if (typeof obj === "object" && obj !== null) {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(obj)) {
-      out[k] = k === "photoUrl" && typeof v === "string" ? "[photo]" : stripPhotoUrls(v);
-    }
-    return out;
-  }
-  return obj;
-}
-
-/**
- * Each chat POST is stateless. Assistant UI parts retain OpenAI Responses `itemId`s
- * from the prior stream; with default store:true the provider turns those into
- * `item_reference` instead of text, which is invalid on a new HTTP request.
- * Strip ephemeral provider ids and reasoning scaffolding so history round-trips as plain content.
- */
-function sanitizeMessagesForStatelessRequest(raw: unknown[]): UIMessage[] {
-  return (Array.isArray(raw) ? raw : []).map((msg) => {
-    if (
-      typeof msg !== "object" ||
-      msg === null ||
-      !("role" in msg) ||
-      !("parts" in msg) ||
-      !Array.isArray((msg as { parts: unknown }).parts)
-    ) {
-      return msg as UIMessage;
-    }
-    const m = msg as UIMessage;
-    if (m.role !== "assistant") return m;
-
-    const parts = m.parts
-      .filter((p) => p.type !== "reasoning" && p.type !== "step-start")
-      .map((part) => {
-        const next = { ...part } as Record<string, unknown>;
-        delete next.providerMetadata;
-        delete next.callProviderMetadata;
-        if (next.type === "tool-invocation" && next.result !== undefined) {
-          next.result = stripPhotoUrls(next.result);
-        }
-        return next as (typeof m.parts)[number];
-      });
-
-    return { ...m, parts };
-  });
-}
 
 async function extractPdfTextFromDataUrl(dataUrl: string): Promise<string> {
   try {
@@ -268,6 +216,23 @@ function formatRecommendations(
   return lines.join("\n");
 }
 
+function capRecommendationsText(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const lines = text.split("\n");
+  const kept: string[] = [];
+  let used = 0;
+  for (const line of lines) {
+    if (used + line.length + 1 > maxChars) break;
+    kept.push(line);
+    used += line.length + 1;
+  }
+  const dropped = lines.length - kept.length;
+  kept.push(
+    `\n…${dropped} more recommendation line${dropped === 1 ? "" : "s"} available — call \`get_recommendations\` to view the rest.`,
+  );
+  return kept.join("\n");
+}
+
 export async function POST(req: Request) {
   const { userId, error } = await requireAuth();
   if (error) return error;
@@ -278,9 +243,10 @@ export async function POST(req: Request) {
   const trip = tripId ? await getTrip(tripId, userId) : null;
   const preferences = await getPreferences(userId);
 
-  const recsText = trip?.recommendations?.length
+  const recsTextRaw = trip?.recommendations?.length
     ? formatRecommendations(trip.recommendations, trip.phase as Phase | undefined, trip.recommenderPriorities)
     : undefined;
+  const recsText = recsTextRaw ? capRecommendationsText(recsTextRaw, 20_000) : undefined;
 
   const systemPrompt = buildSystemPrompt({
     phase: trip?.phase,
@@ -600,12 +566,30 @@ export async function POST(req: Request) {
   const preprocessed = await preprocessFilePartsInMessages(messages);
   const modelMessages = await convertToModelMessages(preprocessed);
 
+  const maxSteps = Number(process.env.CHAT_MAX_STEPS) || 50;
+  const startedAt = Date.now();
+  const messagesJsonChars = JSON.stringify(modelMessages).length;
+  const systemPromptChars = systemPrompt.length;
+
+  const top3LargestToolResults = topNLargestToolResults(messages, 3);
+
+  console.log("[chat-telemetry] request", {
+    tripId: tripId ?? null,
+    userId,
+    messageCount: modelMessages.length,
+    systemPromptChars,
+    messagesJsonChars,
+    estTokens: Math.ceil((systemPromptChars + messagesJsonChars) / 4),
+    top3LargestToolResults,
+  });
+
+  let stepIndex = 0;
   const result = streamText({
     model: openai("gpt-5.4"),
     system: systemPrompt,
     messages: modelMessages,
     tools: allTools,
-    stopWhen: stepCountIs(10),
+    stopWhen: stepCountIs(maxSteps),
     providerOptions: {
       openai: {
         reasoningEffort: "high",
@@ -616,10 +600,28 @@ export async function POST(req: Request) {
         store: false,
       },
     },
-    onFinish: async () => {
+    onStepFinish: ({ finishReason, toolCalls }) => {
+      stepIndex += 1;
+      console.log("[chat-telemetry] step", {
+        step: stepIndex,
+        finishReason,
+        toolCallCount: toolCalls?.length ?? 0,
+      });
+    },
+    onFinish: async ({ finishReason, usage }) => {
+      console.log("[chat-telemetry] finish", {
+        totalSteps: stepIndex,
+        finishReason,
+        durationMs: Date.now() - startedAt,
+        usage,
+      });
       await peek.close();
     },
-    onError: async () => {
+    onError: async ({ error: streamError }) => {
+      console.error("[chat-telemetry] error", {
+        durationMs: Date.now() - startedAt,
+        error: streamError instanceof Error ? streamError.message : String(streamError),
+      });
       await peek.close();
     },
   });
