@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { listTrips, saveTrip, getTrip, deleteTrip } from "@/lib/trips-store";
 import { createNewTrip } from "@/lib/types";
 import { requireAuth } from "@/lib/api-auth";
+import { classifyDbError } from "@/lib/db-errors";
 import { v4 as uuidv4 } from "uuid";
 
 export async function GET(req: Request) {
@@ -66,8 +67,7 @@ export async function PUT(req: Request) {
     await saveTrip(trip as Parameters<typeof saveTrip>[0], userId);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    const isTimeout = /timeout|timed out|connect/i.test(message);
-    const code = isTimeout ? "db_timeout" : "db_unknown";
+    const code = classifyDbError(message);
     console.error("[chat-persist] put failed", {
       tripId,
       payloadKB,
