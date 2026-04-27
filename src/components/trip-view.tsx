@@ -116,10 +116,6 @@ export function TripView() {
             />
           )}
 
-          {hasSkeleton && !hasDays && (
-            <ItinerarySkeletonSection days={state.itinerarySkeleton!} />
-          )}
-
           {hasLodging && !hasHotels && (
             <ConfirmedLodgingSection hotels={state.lodging!.confirmedHotels!} />
           )}
@@ -162,13 +158,28 @@ export function TripView() {
             </CollapsibleSection>
           )}
 
-          {hasDays && (
-            <CollapsibleSection title="Day Plans" icon={Calendar}>
-              <div className="space-y-7">
-                {state.days.map((day) => (
-                  <DayTimeline key={day.id} day={day} cityName={cityMap[day.cityId]} />
-                ))}
-              </div>
+          {/* One "Day plans" block: detailed `state.days` when present, else high-level `itinerarySkeleton`. */}
+          {(hasDays || hasSkeleton) && (
+            <CollapsibleSection
+              title="Day plans"
+              icon={Calendar}
+              badge={hasDays ? undefined : "Overview"}
+            >
+              {hasDays ? (
+                <div className="space-y-7">
+                  {state.days.map((day) => (
+                    <DayTimeline key={day.id} day={day} cityName={cityMap[day.cityId]} />
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-[11px] text-muted-foreground/70 leading-relaxed">
+                    High-level schedule only. Timed stops and full day-trip breakdowns appear here after the agent
+                    saves structured day plans to the trip (not just chat text).
+                  </p>
+                  <ItinerarySkeletonContent days={state.itinerarySkeleton!} />
+                </div>
+              )}
             </CollapsibleSection>
           )}
 
@@ -258,7 +269,7 @@ function RouteOverview({
   );
 }
 
-function ItinerarySkeletonSection({ days }: { days: SkeletonDay[] }) {
+function ItinerarySkeletonContent({ days }: { days: SkeletonDay[] }) {
   const formatDate = (iso: string) => {
     try {
       const d = new Date(iso + "T00:00:00");
@@ -269,25 +280,23 @@ function ItinerarySkeletonSection({ days }: { days: SkeletonDay[] }) {
   };
 
   return (
-    <CollapsibleSection title="Itinerary Overview" icon={Calendar}>
-      <div className="space-y-0">
-        {days.map((day, i) => (
-          <div key={day.date} className="flex gap-3 group">
-            <div className="flex flex-col items-center">
-              <div className="size-2 rounded-full bg-primary/40 ring-2 ring-primary/10 mt-1.5 shrink-0" />
-              {i < days.length - 1 && <div className="w-px flex-1 bg-border/60 my-1" />}
-            </div>
-            <div className="pb-4 min-w-0">
-              <div className="flex items-baseline gap-2">
-                <span className="text-xs font-semibold text-foreground/80">{formatDate(day.date)}</span>
-                <span className="text-[11px] text-primary/60 font-medium">{day.city}</span>
-              </div>
-              <p className="text-sm text-muted-foreground mt-0.5 leading-relaxed">{day.plan}</p>
-            </div>
+    <div className="space-y-0">
+      {days.map((day, i) => (
+        <div key={day.date} className="flex gap-3 group">
+          <div className="flex flex-col items-center">
+            <div className="size-2 rounded-full bg-primary/40 ring-2 ring-primary/10 mt-1.5 shrink-0" />
+            {i < days.length - 1 && <div className="w-px flex-1 bg-border/60 my-1" />}
           </div>
-        ))}
-      </div>
-    </CollapsibleSection>
+          <div className="pb-4 min-w-0">
+            <div className="flex items-baseline gap-2">
+              <span className="text-xs font-semibold text-foreground/80">{formatDate(day.date)}</span>
+              <span className="text-[11px] text-primary/60 font-medium">{day.city}</span>
+            </div>
+            <p className="text-sm text-muted-foreground mt-0.5 leading-relaxed">{day.plan}</p>
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 

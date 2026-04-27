@@ -185,7 +185,9 @@ Use this tool to push structured updates to the trip itinerary. Call it whenever
 - You move to a new planning phase
 - You need to update trip metadata (name, dates, destination)
 
-The tripState field accepts partial updates — only include the fields you're changing.`);
+The tripState field accepts partial updates — only include the fields you're changing.
+
+**Itinerary overview vs detailed day plans (left panel):** \`itinerarySkeleton\` (date + one-line \`plan\` per day) is what the user sees as "Day plans · **Overview**" — rough outlines only. The **detailed** schedule (times, ordered stops, meals, per–day trip breakdowns) appears in the same panel only when you also populate \`tripState.days\`: one \`DayPlan\` per date, each with a \`cityId\` that matches an existing city in \`cities\`, a \`daySummary\` string, and \`activities\` (typed POIs, meals, travel legs, etc.). If you only set \`itinerarySkeleton\` or only describe a Sintra / Cascais / Douro day in chat text, the **trip** UI will not show the stop-by-stop plan. When the user asks to "plan the day" or "day trip" in detail, **commit that structure via \`update_trip\` with \`days\`**, not just prose.`);
 
   if (context?.todayUtc) {
     parts.push(`\n## Today's date (live pricing & bookings)\n**Today is ${context.todayUtc}** (UTC calendar date). Never set \`update_trip\` \`startDate\`/\`endDate\`, any flight segment date, or lodging \`checkIn\`/\`checkOut\` to a day **before** today. If the user's timeframe is ambiguous or already partly in the past (e.g. a month that has started), choose a **forward** sample window (rest of the month, late-month strip, or next year if they meant a future year) **before** your first \`search_flights\`, \`search_multi_city_flights\`, \`search_hotels\`, \`search_vacation_rentals\`, or \`search_airbnb\` call — avoid wasting steps on dates the tools will reject.`);

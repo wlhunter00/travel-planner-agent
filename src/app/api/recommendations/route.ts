@@ -4,7 +4,7 @@ import { z } from "zod";
 import { getTrip, saveTrip } from "@/lib/trips-store";
 import { fetchUrlContent } from "@/lib/tools/exa";
 import { searchPlaces, getPlaceDetails } from "@/lib/tools/google-places";
-import type { Recommendation, ExtractedItem } from "@/lib/types";
+import type { Recommendation, ExtractedItem, Trip } from "@/lib/types";
 import { v4 as uuid } from "uuid";
 
 export const maxDuration = 60;
@@ -273,7 +273,12 @@ function chunkText(text: string, maxChars: number, overlap: number): string[] {
 
 // ── Document triage ───────────────────────────────────────────────────────
 
-const TRIAGE_MIN_LENGTH = 5000;
+// Triage exists to filter out encyclopedic/historical filler from large documents
+// (e.g. a 30+ page travel guide where most pages are background reading). For shorter
+// documents, the cost of triage (dropping real recommendations as collateral) outweighs
+// the benefit, so we skip it and just chunk + extract directly. ~30k chars is roughly
+// 10-15 pages of dense PDF text — the inflection point in practice.
+const TRIAGE_MIN_LENGTH = 30_000;
 const TRIAGE_MAX_LENGTH = 400_000;
 const BLOCK_TARGET_CHARS = 800;
 
@@ -385,7 +390,14 @@ function normalizeKey(name: string): string {
 function deduplicateItems(items: ExtractedItem[]): ExtractedItem[] {
   const seen = new Map<string, ExtractedItem>();
   for (const item of items) {
-    const key = normalizeKey(item.name);
+    // Include a location prefix in the key so same-named places in different locations
+    // (e.g. Manteigaria in Porto vs Manteigaria in Lisbon) survive into enrichment, where
+    // deduplicateByAddress will collapse true duplicates using canonical Google addresses.
+    const nameKey = normalizeKey(item.name);
+    const locKey = item.location
+      ? item.location.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 25)
+      : "";
+    const key = `${nameKey}|${locKey}`;
     const existing = seen.get(key);
     if (!existing || (item.notes && !existing.notes)) {
       seen.set(key, item);
@@ -464,9 +476,165 @@ async function extractItemsFromChunk(
   }));
 }
 
+// ── Trip-aware Google Places enrichment ───────────────────────────────────
+
+/**
+ * A bag of region tokens (countries, cities, destination string) used to:
+ *   1. Bias Google search queries toward the trip's region
+ *   2. Reject Google matches whose address falls outside the trip's region
+ *
+ * Tokens are lowercased and stripped of punctuation.
+ */
+interface TripContext {
+  /** Best single phrase to append to search queries (e.g. "Portugal" or "Porto and Lisbon"). */
+  searchHint?: string;
+  /** Tokens that should appear in a valid Google address (cities + countries). */
+  addressTokens: string[];
+}
+
+function buildTripContext(trip: Trip | null): TripContext {
+  if (!trip) return { addressTokens: [] };
+
+  const cityNames = (trip.state?.cities || []).map((c) => c.name).filter(Boolean);
+  const countries = Array.from(
+    new Set(
+      (trip.state?.cities || []).map((c) => c.country).filter(Boolean)
+    )
+  );
+
+  const tokens: string[] = [];
+  for (const c of [...cityNames, ...countries]) {
+    tokens.push(c.toLowerCase().replace(/[^a-z0-9\s]/g, "").trim());
+  }
+  if (trip.destination) {
+    // Destination might be free-form like "Portugal trip" or "Porto and Lisbon"; split into words.
+    for (const word of trip.destination.toLowerCase().split(/[^a-z0-9]+/)) {
+      if (word.length >= 3) tokens.push(word);
+    }
+  }
+
+  // Build a single "search hint" — prefer countries (most discriminating), else cities, else destination.
+  const searchHint =
+    countries[0] ||
+    (cityNames.length > 0 ? cityNames.join(" or ") : undefined) ||
+    trip.destination ||
+    undefined;
+
+  return { searchHint, addressTokens: Array.from(new Set(tokens)) };
+}
+
+/**
+ * Returns true if the Google-returned address plausibly falls within the trip's region.
+ * If we have no trip context (free-form recommendation, no cities yet), we always accept.
+ */
+function addressMatchesTrip(address: string | undefined, ctx: TripContext): boolean {
+  if (!ctx.addressTokens.length) return true;
+  if (!address) return true; // can't filter what we don't see; accept.
+  const addr = address.toLowerCase();
+  return ctx.addressTokens.some((t) => t && addr.includes(t));
+}
+
+const FRIENDLY_TYPE_LABELS: Record<string, string> = {
+  italian_restaurant: "Italian restaurant",
+  french_restaurant: "French restaurant",
+  japanese_restaurant: "Japanese restaurant",
+  chinese_restaurant: "Chinese restaurant",
+  thai_restaurant: "Thai restaurant",
+  mexican_restaurant: "Mexican restaurant",
+  mediterranean_restaurant: "Mediterranean restaurant",
+  seafood_restaurant: "Seafood restaurant",
+  steak_house: "Steakhouse",
+  sushi_restaurant: "Sushi restaurant",
+  vegetarian_restaurant: "Vegetarian restaurant",
+  vegan_restaurant: "Vegan restaurant",
+  pizza_restaurant: "Pizzeria",
+  fine_dining_restaurant: "Fine dining restaurant",
+  fast_food_restaurant: "Casual eatery",
+  brunch_restaurant: "Brunch spot",
+  breakfast_restaurant: "Breakfast spot",
+  cafe: "Cafe",
+  coffee_shop: "Coffee shop",
+  bakery: "Bakery",
+  ice_cream_shop: "Ice cream shop",
+  dessert_shop: "Dessert shop",
+  bar: "Bar",
+  wine_bar: "Wine bar",
+  pub: "Pub",
+  night_club: "Nightclub",
+  brewery: "Brewery",
+  winery: "Winery",
+  hotel: "Hotel",
+  hostel: "Hostel",
+  museum: "Museum",
+  art_gallery: "Art gallery",
+  church: "Church",
+  cathedral: "Cathedral",
+  mosque: "Mosque",
+  synagogue: "Synagogue",
+  hindu_temple: "Hindu temple",
+  buddhist_temple: "Buddhist temple",
+  monument: "Monument",
+  historical_landmark: "Historical landmark",
+  tourist_attraction: "Tourist attraction",
+  park: "Park",
+  national_park: "National park",
+  beach: "Beach",
+  market: "Market",
+  shopping_mall: "Shopping mall",
+  book_store: "Bookstore",
+  clothing_store: "Clothing store",
+  library: "Library",
+  zoo: "Zoo",
+  aquarium: "Aquarium",
+  amusement_park: "Amusement park",
+  spa: "Spa",
+};
+
+/**
+ * Synthesizes a one-line description from Google's place types when the editorial
+ * summary is missing. Picks the most specific known type. Returns undefined if no
+ * type maps to a friendly label.
+ */
+function describeFromTypes(types?: string[]): string | undefined {
+  if (!types?.length) return undefined;
+  // Prefer types in the order Google returns them — they're sorted most-specific first.
+  for (const t of types) {
+    const label = FRIENDLY_TYPE_LABELS[t];
+    if (label) return label;
+  }
+  return undefined;
+}
+
+function deduplicateByPlaceId(items: ExtractedItem[]): ExtractedItem[] {
+  const seen = new Map<string, ExtractedItem>();
+  const result: ExtractedItem[] = [];
+  for (const item of items) {
+    if (!item.placeId) {
+      result.push(item);
+      continue;
+    }
+    const existing = seen.get(item.placeId);
+    if (!existing) {
+      seen.set(item.placeId, item);
+      result.push(item);
+    } else {
+      // Keep whichever has richer notes
+      const incomingScore = (item.notes?.length ?? 0);
+      const existingScore = (existing.notes?.length ?? 0);
+      if (incomingScore > existingScore) {
+        const idx = result.indexOf(existing);
+        if (idx >= 0) result[idx] = item;
+        seen.set(item.placeId, item);
+      }
+    }
+  }
+  return result;
+}
+
 async function extractItems(
   rawText: string,
-  sourceUrl?: string
+  sourceUrl: string | undefined,
+  tripCtx: TripContext
 ): Promise<ExtractedItem[]> {
   const triaged = await triageDocument(rawText);
   const chunks = chunkText(triaged, 8000, 1000);
@@ -476,31 +644,66 @@ async function extractItems(
   );
 
   const dedupedByName = deduplicateItems(chunkResults.flat());
-  const enriched = await enrichItemsViaPlaces(dedupedByName);
-  return deduplicateByAddress(enriched);
+  const enriched = await enrichItemsViaPlaces(dedupedByName, tripCtx);
+  const dedupedByAddress = deduplicateByAddress(enriched);
+  return deduplicateByPlaceId(dedupedByAddress);
 }
 
-async function enrichItemsViaPlaces(items: ExtractedItem[]): Promise<ExtractedItem[]> {
+async function enrichItemsViaPlaces(
+  items: ExtractedItem[],
+  tripCtx: TripContext
+): Promise<ExtractedItem[]> {
   if (!process.env.GOOGLE_MAPS_API_KEY) return items;
 
   const enriched = await Promise.all(
     items.map(async (item) => {
       try {
-        const query = item.location ? `${item.name}, ${item.location}` : item.name;
-        const { places } = await searchPlaces({ query });
+        // Bias the search to the trip region. Two layers:
+        //   1. Append the trip's region to the query string when the LLM didn't
+        //      already capture a location — this is the strongest signal for
+        //      Google's text search.
+        //   2. Pass `location` to searchPlaces so it geocodes and applies a
+        //      locationBias circle around the trip area.
+        const queryParts = [item.name];
+        if (item.location) queryParts.push(item.location);
+        if (tripCtx.searchHint) queryParts.push(tripCtx.searchHint);
+        const query = queryParts.join(", ");
+
+        const { places } = await searchPlaces({
+          query,
+          location: item.location || tripCtx.searchHint,
+        });
         if (!places.length) return item;
 
         const top = places[0];
+
+        // Reject matches whose address falls outside the trip region. Catches
+        // global namesakes (e.g. "Alma" → Brooklyn, "Portobello Road Market" → London,
+        // "Bao Bao Cafe" → wherever) that slip past query biasing because their global
+        // popularity outranks the local match.
+        if (!addressMatchesTrip(top.address, tripCtx)) {
+          return item;
+        }
+
         const details = await getPlaceDetails({ placeId: top.placeId });
         if (!details) return item;
+
+        // Defense in depth — verify the detailed address too.
+        if (!addressMatchesTrip(details.address, tripCtx)) {
+          return item;
+        }
 
         const ratingStr = details.rating ? `${details.rating}★` : "";
         const reviewCountStr = details.reviewCount ? `(${details.reviewCount} reviews)` : "";
         const ratingBadge = [ratingStr, reviewCountStr].filter(Boolean).join(" ");
 
-        // Compose notes: rating · Google's description · recommender's tip
-        // Skip the recommender's tip if it duplicates Google's description.
-        const description = details.description?.trim();
+        // Description: prefer Google's editorialSummary; fall back to a friendly
+        // type label ("Italian restaurant", "Park", "Bookstore"). Better than nothing
+        // for places where Google has no editorial coverage.
+        const description = details.description?.trim() || describeFromTypes(top.types);
+
+        // Compose notes: rating · description · recommender's tip
+        // Skip the recommender's tip if it duplicates the description.
         const personalNote = item.notes?.trim();
         const isRedundant =
           description && personalNote &&
@@ -518,13 +721,18 @@ async function enrichItemsViaPlaces(items: ExtractedItem[]): Promise<ExtractedIt
           notes,
           sourceUrl: item.sourceUrl || details.website || undefined,
           priceRange: item.priceRange || (details.priceLevel != null ? PRICE_LEVEL_LABELS[details.priceLevel] : undefined),
-          // Prefer Google's categorization when it's specific; only fall back to the LLM's
-          // pick if Google also returns "general". This avoids markets/landmarks/etc. being
-          // labeled "general" just because the LLM didn't have a better bucket.
+          placeId: details.placeId || top.placeId,
+          // The LLM has the surrounding text context (e.g. "Time Out Market - 10 min from Teatro"
+          // → restaurant, not bar; "Fauna & Flora - brunch" → restaurant, not bar). Google's
+          // place types are a flat list and often include incidental categories — e.g. a food
+          // hall like Time Out Market is tagged with `bar` because it has bar stalls inside.
+          //
+          // Rule: trust the LLM's specific call. Only fall back to Google's categorization
+          // when the LLM punted to "general" (typical for markets, landmarks, etc. that the
+          // LLM doesn't have a bucket for).
           category: (() => {
-            const googleCat = categorizePlaceTypes(top.types);
-            if (googleCat !== "general") return googleCat;
-            return item.category || "general";
+            if (item.category && item.category !== "general") return item.category;
+            return categorizePlaceTypes(top.types);
           })(),
         };
       } catch {
@@ -568,11 +776,12 @@ export async function POST(req: Request) {
     };
 
     try {
+      const tripCtx = buildTripContext(trip);
       const { rawText, sourceUrl, directItems } = await extractRawContent(type, content);
       if (directItems && directItems.length > 0) {
         rec.extractedItems = directItems;
       } else if (rawText.trim()) {
-        rec.extractedItems = await extractItems(rawText, sourceUrl);
+        rec.extractedItems = await extractItems(rawText, sourceUrl, tripCtx);
       }
       rec.status = "ready";
     } catch (err) {

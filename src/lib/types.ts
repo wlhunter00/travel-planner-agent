@@ -131,6 +131,8 @@ export interface ExtractedItem {
   notes?: string;
   sourceUrl?: string;
   priceRange?: string;
+  /** Google Places `placeId` if the item was enriched. Used for canonical dedup. */
+  placeId?: string;
 }
 
 export interface Recommendation {
