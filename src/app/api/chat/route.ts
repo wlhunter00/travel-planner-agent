@@ -20,7 +20,7 @@ import { pushToWanderlog } from "@/lib/tools/wanderlog/push-to-wanderlog";
 import { z } from "zod";
 import type { Tool } from "ai";
 import type { Recommendation, Phase, RecommendationCategory } from "@/lib/types";
-import { sanitizeMessagesForStatelessRequest } from "@/lib/chat-context";
+import { sanitizeMessagesForStatelessRequest, topNLargestToolResults } from "@/lib/chat-context";
 
 export const maxDuration = 300;
 
@@ -571,21 +571,7 @@ export async function POST(req: Request) {
   const messagesJsonChars = JSON.stringify(modelMessages).length;
   const systemPromptChars = systemPrompt.length;
 
-  const top3LargestToolResults = (() => {
-    const sized: { toolName: string; sizeKB: number; msgIndex: number }[] = [];
-    messages.forEach((m, msgIndex) => {
-      if (m.role !== "assistant") return;
-      for (const part of m.parts) {
-        const p = part as Record<string, unknown>;
-        if (p.type === "tool-invocation" && p.result !== undefined) {
-          const sizeKB = Math.round(JSON.stringify(p.result).length / 1024);
-          const toolName = (p.toolName as string) || "unknown";
-          sized.push({ toolName, sizeKB, msgIndex });
-        }
-      }
-    });
-    return sized.sort((a, b) => b.sizeKB - a.sizeKB).slice(0, 3);
-  })();
+  const top3LargestToolResults = topNLargestToolResults(messages, 3);
 
   console.log("[chat-telemetry] request", {
     tripId: tripId ?? null,

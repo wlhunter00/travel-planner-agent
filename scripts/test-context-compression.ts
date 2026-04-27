@@ -11,7 +11,14 @@
  * Usage: npx tsx scripts/test-context-compression.mts
  */
 
-import { sanitizeMessagesForStatelessRequest } from "../src/lib/chat-context";
+import {
+  sanitizeMessagesForStatelessRequest,
+  topNLargestToolResults,
+  isToolPart,
+  getToolPartName,
+  readToolOutput,
+} from "../src/lib/chat-context";
+import { classifyDbError } from "../src/lib/db-errors";
 import type { UIMessage } from "ai";
 
 let failed = 0;
@@ -149,6 +156,90 @@ function totalBytes(msgs: UIMessage[]): number {
   console.log("\n[Scenario D] edge cases");
   assert(sanitizeMessagesForStatelessRequest([]).length === 0, "empty input returns empty");
   assert(sanitizeMessagesForStatelessRequest(null as unknown as unknown[]).length === 0, "null input returns empty");
+}
+
+// Scenario E: topNLargestToolResults on v6 shape (regression: was empty before)
+{
+  console.log("\n[Scenario E] topNLargestToolResults on v6 shape");
+  const msgs: UIMessage[] = [
+    userMsg("u1", "find places"),
+    assistantToolMsg("a1", "search_places", {
+      items: Array.from({ length: 50 }, (_, i) => makeBigPlace(i)),
+    }),
+    userMsg("u2", "and hotels"),
+    assistantToolMsg("a2", "search_hotels", {
+      items: Array.from({ length: 5 }, (_, i) => makeBigPlace(i)),
+    }),
+    assistantToolMsg("a3", "get_place_details", { name: "tiny" }),
+  ];
+  const top = topNLargestToolResults(msgs, 3);
+  assert(top.length === 3, "v6 shape: returns 3 results when 3+ tool calls present");
+  assert(top[0].toolName === "search_places", "v6 shape: largest result first");
+  assert(top[0].sizeKB >= top[1].sizeKB, "v6 shape: sorted descending by size");
+  assert(top[2].toolName === "get_place_details", "v6 shape: smallest result last");
+  assert(
+    top.every((t) => typeof t.msgIndex === "number" && t.msgIndex >= 0),
+    "v6 shape: each result has msgIndex",
+  );
+}
+
+// Scenario F: topNLargestToolResults on legacy v5 shape (forward compat)
+// v5 used { type: "tool-invocation", toolName, result }; the shared helpers
+// match via the "tool-" prefix and read the `result` field as a fallback,
+// so v5 messages still get counted in telemetry.
+{
+  console.log("\n[Scenario F] topNLargestToolResults on legacy v5 shape");
+  const v5Msg = {
+    id: "a1",
+    role: "assistant",
+    parts: [
+      {
+        type: "tool-invocation",
+        toolName: "search_places",
+        result: { items: Array.from({ length: 30 }, (_, i) => makeBigPlace(i)) },
+      },
+    ],
+  } as unknown as UIMessage;
+  const msgs: UIMessage[] = [userMsg("u1", "find"), v5Msg];
+  const top = topNLargestToolResults(msgs, 3);
+  assert(top.length === 1, "v5 shape: helper finds the tool result via fallback");
+  assert(top[0].sizeKB > 0, "v5 shape: size computed from `result` field");
+  assert(typeof top[0].msgIndex === "number", "v5 shape: msgIndex populated");
+}
+
+// Scenario G: classifyDbError — narrow regex no longer mislabels
+{
+  console.log("\n[Scenario G] classifyDbError");
+  assert(classifyDbError("ETIMEDOUT") === "db_timeout", "ETIMEDOUT → db_timeout");
+  assert(classifyDbError("ECONNRESET") === "db_timeout", "ECONNRESET → db_timeout");
+  assert(classifyDbError("Query timeout after 5s") === "db_timeout", "'timeout' substring → db_timeout");
+  assert(classifyDbError("operation timed out") === "db_timeout", "'timed out' → db_timeout");
+  assert(classifyDbError("ECONNREFUSED 127.0.0.1:5432") === "db_timeout", "ECONNREFUSED → db_timeout");
+  // Regression: previously /connect/i matched these as timeouts
+  assert(classifyDbError("connection successfully established") === "db_unknown", "'connect' alone → db_unknown");
+  assert(classifyDbError("constraint violation") === "db_unknown", "constraint violation → db_unknown");
+  assert(classifyDbError("unknown error") === "db_unknown", "generic error → db_unknown");
+  assert(classifyDbError("") === "db_unknown", "empty string → db_unknown");
+}
+
+// Scenario H: shared helpers behave correctly on common shapes
+{
+  console.log("\n[Scenario H] isToolPart / getToolPartName / readToolOutput");
+  assert(isToolPart({ type: "tool-search_places" }) === true, "isToolPart: tool-* → true");
+  assert(isToolPart({ type: "dynamic-tool" }) === true, "isToolPart: dynamic-tool → true");
+  assert(isToolPart({ type: "text" }) === false, "isToolPart: text → false");
+  assert(isToolPart({ type: "reasoning" }) === false, "isToolPart: reasoning → false");
+  assert(getToolPartName({ type: "tool-search_places" }) === "search_places", "name from tool- prefix");
+  assert(
+    getToolPartName({ type: "dynamic-tool", toolName: "custom" }) === "custom",
+    "name from dynamic-tool toolName",
+  );
+  const v6Read = readToolOutput({ output: { items: [1] } });
+  assert(v6Read.key === "output" && v6Read.value !== undefined, "readToolOutput: prefers output (v6)");
+  const v5Read = readToolOutput({ result: { items: [1] } });
+  assert(v5Read.key === "result" && v5Read.value !== undefined, "readToolOutput: falls back to result (v5)");
+  const noneRead = readToolOutput({ type: "tool-foo" });
+  assert(noneRead.key === null && noneRead.value === undefined, "readToolOutput: returns null when neither present");
 }
 
 console.log(`\n${failed === 0 ? "✅ all scenarios passed" : `❌ ${failed} assertion(s) failed`}`);

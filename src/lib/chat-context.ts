@@ -16,20 +16,47 @@ export function stripPhotoUrls(obj: unknown): unknown {
   return obj;
 }
 
-function isToolPart(part: { type?: unknown }): boolean {
+export function isToolPart(part: { type?: unknown }): boolean {
   return typeof part.type === "string" && (part.type.startsWith("tool-") || part.type === "dynamic-tool");
 }
 
-function getToolPartName(part: Record<string, unknown>): string {
+export function getToolPartName(part: Record<string, unknown>): string {
   if (part.type === "dynamic-tool" && typeof part.toolName === "string") return part.toolName;
   if (typeof part.type === "string" && part.type.startsWith("tool-")) return part.type.slice(5);
   return "unknown";
 }
 
-function readToolOutput(part: Record<string, unknown>): { value: unknown; key: "output" | "result" | null } {
+export function readToolOutput(
+  part: Record<string, unknown>,
+): { value: unknown; key: "output" | "result" | null } {
   if (part.output !== undefined) return { value: part.output, key: "output" };
   if (part.result !== undefined) return { value: part.result, key: "result" };
   return { value: undefined, key: null };
+}
+
+/**
+ * Returns the N largest tool results across all assistant messages, sorted
+ * descending by serialized size. Used by request-time telemetry. Handles both
+ * v6 (`tool-${name}` + `output`) and legacy v5 (`tool-invocation` + `result`)
+ * shapes via the shared helpers above.
+ */
+export function topNLargestToolResults(
+  messages: UIMessage[],
+  n: number,
+): { toolName: string; sizeKB: number; msgIndex: number }[] {
+  const sized: { toolName: string; sizeKB: number; msgIndex: number }[] = [];
+  messages.forEach((m, msgIndex) => {
+    if (m.role !== "assistant") return;
+    for (const part of m.parts) {
+      const p = part as Record<string, unknown>;
+      if (!isToolPart(p)) continue;
+      const { value } = readToolOutput(p);
+      if (value === undefined) continue;
+      const sizeKB = Math.round(JSON.stringify(value).length / 1024);
+      sized.push({ toolName: getToolPartName(p), sizeKB, msgIndex });
+    }
+  });
+  return sized.sort((a, b) => b.sizeKB - a.sizeKB).slice(0, n);
 }
 
 export function capToolResult(result: unknown, maxBytes: number): unknown {
