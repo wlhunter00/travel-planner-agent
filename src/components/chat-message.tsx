@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
 import type { UIMessage } from "ai";
-import { isReasoningUIPart, isToolUIPart, isTextUIPart } from "ai";
+import { isReasoningUIPart, isToolUIPart, isTextUIPart, getToolName, type ToolUIPart } from "ai";
 import { ReasoningPart } from "@/components/reasoning-part";
 import { ToolCallPart } from "@/components/tool-call-part";
 import { CollapsedStepsSummary } from "@/components/collapsed-steps-summary";
@@ -200,7 +200,12 @@ function partIsRenderable(part: UIMessage["parts"][number]): boolean {
   return false;
 }
 
+function isExportPdfPart(part: UIMessage["parts"][number]): boolean {
+  return isToolUIPart(part) && getToolName(part) === "export_pdf";
+}
+
 function isProcessPart(part: UIMessage["parts"][number]): boolean {
+  if (isExportPdfPart(part)) return false;
   return isReasoningUIPart(part) || part.type === "step-start" || isToolUIPart(part);
 }
 
@@ -244,6 +249,16 @@ export const ChatMessage = memo(function ChatMessage({
       <div className="flex w-full flex-col items-start gap-2">
         <CollapsedStepsSummary parts={processParts} />
         {parts.map((part, i) => {
+          if (isExportPdfPart(part)) {
+            return (
+              <ToolCallPart
+                key={toolPartReactKey(part, i)}
+                part={part as ToolUIPart}
+                stackWithPrevious={false}
+                stackWithNext={false}
+              />
+            );
+          }
           if (!isTextUIPart(part) || !part.text?.trim()) return null;
           return <TextPart key={`text-${i}`} text={part.text} isStreaming={false} />;
         })}
