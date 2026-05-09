@@ -37,12 +37,58 @@ const extractionSchema = z.object({
   items: z.array(extractedItemSchema).describe("Extracted travel recommendations"),
 });
 
-async function extractTextFromPdf(base64Data: string): Promise<string> {
-  const { PDFParse } = await import("pdf-parse");
-  const data = Buffer.from(base64Data, "base64");
-  const parser = new PDFParse({ data });
-  const result = await parser.getText();
-  return result.text;
+const DOCX_MIME =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const DOC_MIME = "application/msword";
+
+async function extractTextFromFile(
+  base64Data: string,
+  mimeType?: string,
+  fileName?: string
+): Promise<string> {
+  const effectiveMime = mimeType || inferMimeFromFileName(fileName);
+
+  if (effectiveMime === "application/pdf") {
+    const { PDFParse } = await import("pdf-parse");
+    const data = Buffer.from(base64Data, "base64");
+    const parser = new PDFParse({ data });
+    const result = await parser.getText();
+    return result.text;
+  }
+
+  if (effectiveMime === DOCX_MIME || effectiveMime === DOC_MIME) {
+    const mammoth = await import("mammoth");
+    const buf = Buffer.from(base64Data, "base64");
+    const result = await mammoth.extractRawText({ buffer: buf });
+    return result.value;
+  }
+
+  if (effectiveMime?.startsWith("text/")) {
+    return Buffer.from(base64Data, "base64").toString("utf-8");
+  }
+
+  // Fallback: try PDF first (legacy behavior), then plain text decode
+  try {
+    const { PDFParse } = await import("pdf-parse");
+    const data = Buffer.from(base64Data, "base64");
+    const parser = new PDFParse({ data });
+    const result = await parser.getText();
+    if (result.text.trim()) return result.text;
+  } catch {}
+
+  return Buffer.from(base64Data, "base64").toString("utf-8");
+}
+
+function inferMimeFromFileName(fileName?: string): string | undefined {
+  if (!fileName) return undefined;
+  const ext = fileName.toLowerCase().split(".").pop();
+  switch (ext) {
+    case "pdf": return "application/pdf";
+    case "docx": return DOCX_MIME;
+    case "doc": return DOC_MIME;
+    case "txt": return "text/plain";
+    default: return undefined;
+  }
 }
 
 // ── Google Maps URL handling ──────────────────────────────────────────────
@@ -238,7 +284,9 @@ async function extractFromGoogleMapsUrl(url: string): Promise<{ items: Extracted
 
 async function extractRawContent(
   type: "url" | "text" | "file",
-  content: string
+  content: string,
+  mimeType?: string,
+  fileName?: string
 ): Promise<{ rawText: string; sourceUrl?: string; directItems?: ExtractedItem[] }> {
   switch (type) {
     case "url": {
@@ -250,7 +298,7 @@ async function extractRawContent(
       return { rawText: page.text, sourceUrl: content };
     }
     case "file": {
-      const text = await extractTextFromPdf(content);
+      const text = await extractTextFromFile(content, mimeType, fileName);
       return { rawText: text };
     }
     case "text":
@@ -750,11 +798,13 @@ export async function POST(req: Request) {
     if (error) return error;
 
     const body = await req.json();
-    const { tripId, type, content, recommender } = body as {
+    const { tripId, type, content, recommender, mimeType, fileName } = body as {
       tripId: string;
       type: "url" | "text" | "file";
       content: string;
       recommender?: string;
+      mimeType?: string;
+      fileName?: string;
     };
 
     if (!tripId || !type || !content) {
@@ -769,10 +819,11 @@ export async function POST(req: Request) {
       return Response.json({ error: "Trip not found" }, { status: 404 });
     }
 
+    const fileLabel = fileName || (mimeType?.includes("pdf") ? "PDF" : mimeType?.includes("word") ? "document" : "file");
     const rec: Recommendation = {
       id: uuid(),
       type,
-      rawInput: type === "file" ? "(uploaded PDF)" : content,
+      rawInput: type === "file" ? `(uploaded ${fileLabel})` : content,
       recommender,
       status: "processing",
       extractedItems: [],
@@ -781,7 +832,7 @@ export async function POST(req: Request) {
 
     try {
       const tripCtx = buildTripContext(trip);
-      const { rawText, sourceUrl, directItems } = await extractRawContent(type, content);
+      const { rawText, sourceUrl, directItems } = await extractRawContent(type, content, mimeType, fileName);
       if (directItems && directItems.length > 0) {
         rec.extractedItems = directItems;
       } else if (rawText.trim()) {

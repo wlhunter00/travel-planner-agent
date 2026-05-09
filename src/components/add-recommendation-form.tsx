@@ -76,7 +76,7 @@ export function AddRecommendationForm({
   }, [errorMsg]);
 
   const submit = useCallback(
-    async (type: "url" | "text" | "file", content: string) => {
+    async (type: "url" | "text" | "file", content: string, mimeType?: string, fileName?: string) => {
       setIsSubmitting(true);
       setToast(null);
       setErrorMsg(null);
@@ -89,6 +89,8 @@ export function AddRecommendationForm({
             type,
             content,
             recommender: recommender.trim() || undefined,
+            ...(mimeType && { mimeType }),
+            ...(fileName && { fileName }),
           }),
         });
         if (res.ok) {
@@ -128,7 +130,7 @@ export function AddRecommendationForm({
       const reader = new FileReader();
       reader.onload = () => {
         const base64 = (reader.result as string).split(",")[1];
-        submit("file", base64);
+        submit("file", base64, file.type || undefined, file.name || undefined);
       };
       reader.readAsDataURL(file);
     }
