@@ -23,6 +23,7 @@ export function TripPageClient({ tripId }: TripPageClientProps) {
   const router = useRouter();
   const setTrip = useTripStore((s) => s.setTrip);
   const clearTrip = useTripStore((s) => s.clearTrip);
+  const trip = useTripStore((s) => s.trip);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
@@ -43,6 +44,8 @@ export function TripPageClient({ tripId }: TripPageClientProps) {
     return () => clearTrip();
   }, [tripId, setTrip, clearTrip]);
 
+  const importMeta = trip?.state?.import as ImportMeta | undefined;
+
   if (loading) {
     return (
       <div className="h-screen flex flex-col items-center justify-center gap-3 text-muted-foreground">
@@ -62,9 +65,6 @@ export function TripPageClient({ tripId }: TripPageClientProps) {
       </div>
     );
   }
-
-  const trip = useTripStore((s) => s.trip);
-  const importMeta = trip?.state?.import as ImportMeta | undefined;
 
   return (
     <div className="h-screen flex flex-col">

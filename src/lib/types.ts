@@ -246,6 +246,14 @@ export interface ChatMessage {
   parts?: ChatMessagePart[];
 }
 
+export interface Conversation {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export function createEmptyTripState(): TripState {
   return {
     destination: "",

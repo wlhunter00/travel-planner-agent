@@ -21,7 +21,7 @@ import { ChatMessage } from "@/components/chat-message";
 import { StreamElapsedSlot, StreamingTimeIndicator } from "@/components/streaming-time-indicator";
 import { RecommendationsPanel } from "@/components/recommendations-panel";
 import type { TripState, Phase } from "@/lib/types";
-import { Paperclip, X, FileText, Image as ImageIcon, Sparkles } from "lucide-react";
+import { Paperclip, X, FileText, Image as ImageIcon, Sparkles, Square } from "lucide-react";
 
 function downloadJSON(data: unknown, filename: string) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -92,7 +92,7 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
     [tripId]
   );
 
-  const { messages, sendMessage, status, setMessages, error, clearError } = useChat({
+  const { messages, sendMessage, status, setMessages, error, clearError, stop } = useChat({
     id: tripId,
     transport,
   });
@@ -170,13 +170,13 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
     }
   }, [messages.length]);
 
-  // Auto-trigger critique for imported trips that have no assistant response yet.
-  // The import route does NOT pre-seed chatHistory — instead we detect an imported
-  // trip with zero messages and fire the initial user prompt from the client.
+  // Auto-trigger critique for imported trips that have no persisted assistant response.
+  // Guard uses trip.chatHistory (DB truth) instead of in-memory messages — the latter
+  // is always [] on a fresh page load and races with the hydration effect above.
   useEffect(() => {
     const isImported = !!(trip?.state as Record<string, unknown> | undefined)?.import;
     if (!isImported || didAutoSendRef.current) return;
-    if (messages.length > 0) return;
+    if (trip?.chatHistory && trip.chatHistory.length > 0) return;
     if (status !== "ready") return;
 
     didAutoSendRef.current = true;
@@ -185,7 +185,7 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
       text: "Please review this imported itinerary against my preferences and flag anything I should change.",
     });
     scrollToBottom(scrollRef);
-  }, [trip?.state, messages.length, status, sendMessage]);
+  }, [trip?.id, trip?.state, trip?.chatHistory, status, sendMessage]);
 
   const buildSavePayload = useCallback(() => {
     if (!trip || messages.length === 0) return null;
@@ -541,9 +541,20 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
           rows={1}
           className="flex-1 resize-none rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-base outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 md:text-sm dark:bg-input/30 field-sizing-content max-h-40 overflow-y-auto"
         />
-        <Button type="submit" disabled={isLoading || (!inputValue.trim() && attachedFiles.length === 0)} size="sm">
-          Send
-        </Button>
+        {isLoading ? (
+          <button
+            type="button"
+            onClick={() => stop()}
+            className="shrink-0 size-8 flex items-center justify-center rounded-full bg-foreground/80 text-background hover:bg-foreground transition-colors"
+            title="Stop generating"
+          >
+            <Square className="size-3 fill-current" />
+          </button>
+        ) : (
+          <Button type="submit" disabled={!inputValue.trim() && attachedFiles.length === 0} size="sm">
+            Send
+          </Button>
+        )}
       </form>
     </div>
   );

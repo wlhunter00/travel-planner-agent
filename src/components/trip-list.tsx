@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { UserMenu } from "./user-menu";
 import { Logo } from "./logo";
 import type { Phase, TripStatus } from "@/lib/types";
-import { Plus, FileUp } from "lucide-react";
+import { Plus, FileUp, MessageSquare } from "lucide-react";
 import { ImportItineraryDialog } from "./import-itinerary-dialog";
 
 interface TripIndexEntry {
@@ -84,6 +84,15 @@ export function TripList() {
             >
               <FileUp className="size-4" />
               Import Itinerary
+            </Button>
+            <Button
+              onClick={() => router.push("/chat")}
+              size="lg"
+              variant="outline"
+              className="gap-2 font-medium"
+            >
+              <MessageSquare className="size-4" />
+              Ask Concierge
             </Button>
           </div>
         </div>
