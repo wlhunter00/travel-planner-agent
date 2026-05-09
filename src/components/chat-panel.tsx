@@ -279,8 +279,13 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
   const lastMessage = messages[messages.length - 1];
 
   function addFiles(newFiles: FileList | File[]) {
+    const docMimes = new Set([
+      "application/pdf",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/msword",
+    ]);
     const arr = Array.from(newFiles).filter(
-      (f) => f.type.startsWith("image/") || f.type === "application/pdf" || f.type.startsWith("text/")
+      (f) => f.type.startsWith("image/") || f.type.startsWith("text/") || docMimes.has(f.type)
     );
     if (arr.length > 0) setAttachedFiles((prev) => [...prev, ...arr]);
   }
@@ -466,7 +471,7 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
           <div className="rounded-xl border-2 border-dashed border-primary/40 bg-primary/5 px-8 py-6 text-center">
             <Paperclip className="size-6 text-primary mx-auto mb-2" />
             <p className="text-sm font-medium text-primary">Drop files here</p>
-            <p className="text-xs text-muted-foreground mt-1">Images, PDFs, or text files</p>
+            <p className="text-xs text-muted-foreground mt-1">Images, PDFs, documents, or text files</p>
           </div>
         </div>
       )}
