@@ -2,6 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   BookOpen,
   Building2,
+  FileDown,
   Globe,
   Home,
   Link,
@@ -360,6 +361,16 @@ const GET_RECS_META: ToolMeta = {
   },
 };
 
+const EXPORT_PDF_META: ToolMeta = {
+  actionLabel: "Preparing PDF",
+  Icon: FileDown,
+  summarizeInput: (input) => {
+    const o = asRecord(input);
+    return str(o?.title) || "PDF export";
+  },
+  summarizeOutput: () => "Ready to download",
+};
+
 const FETCH_URL_META: ToolMeta = {
   actionLabel: "Fetching URL",
   Icon: Link,
@@ -399,6 +410,7 @@ const TOOL_REGISTRY: Record<string, ToolMeta> = {
   push_to_wanderlog: WANDERLOG_META,
   get_recommendations: GET_RECS_META,
   fetch_url: FETCH_URL_META,
+  export_pdf: EXPORT_PDF_META,
 };
 
 /** Peek MCP tools are dynamic; names often include `peek` or tool-specific strings. */

@@ -228,5 +228,19 @@ export function buildResearchTools({
       }),
       execute: async ({ url }: { url: string }) => fetchUrlContent(url),
     },
+
+    export_pdf: {
+      description:
+        "Export content as a downloadable PDF the user can share with others. Use when the user asks you to create a PDF, export something for sharing, or wants to send options/comparisons/summaries to someone else (e.g. family, travel companions). Compose the content yourself as markdown — include tables, lists, headings, whatever fits the material. Only call this when the user requests it or clearly implies they want a shareable document.",
+      inputSchema: z.object({
+        title: z.string().describe("Document title shown at the top of the PDF"),
+        subtitle: z.string().optional().describe("Optional subtitle or context line (e.g. 'Rome Trip · Hotel Options')"),
+        content: z.string().describe("Markdown content for the PDF body — use tables, lists, headings, bold/italic as needed"),
+      }),
+      execute: async (args: { title: string; subtitle?: string; content: string }) => ({
+        success: true,
+        ...args,
+      }),
+    },
   };
 }

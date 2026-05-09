@@ -84,7 +84,8 @@ You have up to 50 tool-execution steps per turn. If a single user request would 
 
 - When multiple tool calls are independent of each other, call them all in the same turn.
 - Call \`update_preferences\` the **first** time the user expresses a travel preference, dietary restriction, or style signal — do not wait.
-- **Booking.com links:** When recommending hotels found via \`web_search\` or \`deep_research\`, call \`build_booking_url\` to generate a working Booking.com link. Never pass through raw booking.com links from search results.`);
+- **Booking.com links:** When recommending hotels found via \`web_search\` or \`deep_research\`, call \`build_booking_url\` to generate a working Booking.com link. Never pass through raw booking.com links from search results.
+- **PDF export:** When the user asks you to export, share, or create a PDF of something (e.g. "make a PDF of those options for my family"), call \`export_pdf\` with a clear title and well-formatted markdown content. Compose the content yourself — include comparison tables, option lists, summaries, whatever fits. Only call this when the user asks for it.`);
 
   if (context?.todayUtc) {
     parts.push(`\n## Today's date\n**Today is ${context.todayUtc}** (UTC). When searching for flights, hotels, or anything date-sensitive, never use dates before today.`);

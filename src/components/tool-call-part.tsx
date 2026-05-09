@@ -5,6 +5,7 @@ import { getToolName, type DynamicToolUIPart, type ToolUIPart } from "ai";
 import { Check, ChevronDown, ChevronRight, Loader2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { getToolMeta } from "@/lib/tool-meta";
+import { PdfExportCard } from "@/components/pdf-export-card";
 
 export type ToolCallPartProps = {
   part: ToolUIPart | DynamicToolUIPart;
@@ -48,6 +49,18 @@ export const ToolCallPart = memo(function ToolCallPart({
   const errorText = "errorText" in part && typeof part.errorText === "string" ? part.errorText : null;
 
   const inFlight = isInFlightState(state);
+
+  if (toolName === "export_pdf" && !inFlight && output && !errorText) {
+    const o = output as Record<string, unknown>;
+    return (
+      <PdfExportCard
+        title={String(o.title ?? "Export")}
+        subtitle={o.subtitle ? String(o.subtitle) : undefined}
+        content={String(o.content ?? "")}
+      />
+    );
+  }
+
   const subtitle = inFlight ? summarizeInput(input) : errorText ? errorText : summarizeOutput(output);
 
   const rounded =
