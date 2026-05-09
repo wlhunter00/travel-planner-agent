@@ -10,27 +10,18 @@ import {
   useMemo,
   type FormEvent,
   type KeyboardEvent,
-  type RefObject,
   type ClipboardEvent,
   type DragEvent,
 } from "react";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { ChatMessage } from "@/components/chat-message";
+import {
+  VirtualizedMessageList,
+  type VirtualMessageListHandle,
+} from "@/components/virtualized-message-list";
 import { StreamElapsedSlot, StreamingTimeIndicator } from "@/components/streaming-time-indicator";
 import type { ChatMessage as ChatMsg } from "@/lib/types";
+import { capMessagesToolOutputs } from "@/lib/chat-context";
 import { Paperclip, X, FileText, Image as ImageIcon, Square } from "lucide-react";
-
-function scrollToBottom(scrollRef: RefObject<HTMLDivElement | null>) {
-  requestAnimationFrame(() => {
-    const viewport = scrollRef.current?.querySelector<HTMLDivElement>(
-      '[data-slot="scroll-area-viewport"]'
-    );
-    if (viewport) {
-      viewport.scrollTop = viewport.scrollHeight;
-    }
-  });
-}
 
 interface ConversationPanelProps {
   conversationId: string;
@@ -43,7 +34,7 @@ export function ConversationPanel({
   initialTitle,
   initialMessages,
 }: ConversationPanelProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<VirtualMessageListHandle>(null);
   const [inputValue, setInputValue] = useState("");
   const [streamTurn, setStreamTurn] = useState(0);
   const [title, setTitle] = useState(initialTitle);
@@ -63,6 +54,9 @@ export function ConversationPanel({
   });
 
   const isLoading = status === "streaming" || status === "submitted";
+
+  const messagesRef = useRef(messages);
+  useEffect(() => { messagesRef.current = messages; });
 
   const didHydrateRef = useRef(false);
 
@@ -90,7 +84,7 @@ export function ConversationPanel({
   useEffect(() => {
     if (didHydrateRef.current && messages.length > 0) {
       didHydrateRef.current = false;
-      scrollToBottom(scrollRef);
+      listRef.current?.scrollToBottom();
     }
   }, [messages.length]);
 
@@ -157,21 +151,25 @@ export function ConversationPanel({
   useEffect(() => {
     const prev = prevStatusRef.current;
     prevStatusRef.current = status;
-    if (status !== "ready" || messages.length === 0) return;
+    const currentMessages = messagesRef.current;
+    if (status !== "ready" || currentMessages.length === 0) return;
 
     if (prev === "streaming" || prev === "submitted") {
-      void saveConversation(messages);
-      void autoTitle(messages);
+      void saveConversation(currentMessages);
+      void autoTitle(currentMessages);
+      const trimmed = capMessagesToolOutputs(currentMessages);
+      if (trimmed !== currentMessages) setMessages(trimmed);
       return;
     }
-    const timer = setTimeout(() => saveConversation(messages), 250);
+    const timer = setTimeout(() => saveConversation(messagesRef.current), 250);
     return () => clearTimeout(timer);
-  }, [status, messages, saveConversation, autoTitle]);
+  }, [status, messages.length, saveConversation, autoTitle, setMessages]);
 
   useEffect(() => {
     const handler = () => {
-      if (messages.length === 0) return;
-      const chatHistory = messages.map((m) => ({
+      const currentMessages = messagesRef.current;
+      if (currentMessages.length === 0) return;
+      const chatHistory = currentMessages.map((m) => ({
         role: m.role,
         content: m.parts
           .filter((p): p is { type: "text"; text: string } => p.type === "text")
@@ -193,7 +191,7 @@ export function ConversationPanel({
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [conversationId, messages]);
+  }, [conversationId]);
 
   const lastMessage = messages[messages.length - 1];
 
@@ -225,7 +223,7 @@ export function ConversationPanel({
     sendMessage({ text: inputValue, files: fileList });
     setInputValue("");
     setAttachedFiles([]);
-    scrollToBottom(scrollRef);
+    listRef.current?.scrollToBottom();
   }
 
   function handlePaste(e: ClipboardEvent<HTMLTextAreaElement>) {
@@ -256,32 +254,23 @@ export function ConversationPanel({
     >
       <StreamElapsedSlot key={streamTurn} active={isLoading}>
         {(streamingElapsed) => (
-          <>
-            <ScrollArea className="flex-1 min-h-0 overflow-hidden" ref={scrollRef}>
-              <div className="p-4 space-y-4 max-w-3xl mx-auto">
-                {messages.length === 0 && (
-                  <div className="text-center text-muted-foreground py-10">
-                    <p className="text-sm">
-                      Hi! I&apos;m your travel concierge.
-                    </p>
-                    <p className="text-xs mt-1">
-                      Ask me anything — upload a PDF, compare itineraries, or get a second opinion.
-                    </p>
-                  </div>
-                )}
-
-                {messages.map((message) => (
-                  <ChatMessage
-                    key={message.id}
-                    message={message as UIMessage}
-                    isStreamingAssistant={
-                      isLoading &&
-                      message.role === "assistant" &&
-                      message.id === lastMessage?.id
-                    }
-                  />
-                ))}
-
+          <VirtualizedMessageList
+            ref={listRef}
+            messages={messages as UIMessage[]}
+            isLoading={isLoading}
+            innerClassName="p-4 max-w-3xl mx-auto"
+            emptyState={
+              <div className="text-center text-muted-foreground py-10">
+                <p className="text-sm">
+                  Hi! I&apos;m your travel concierge.
+                </p>
+                <p className="text-xs mt-1">
+                  Ask me anything — upload a PDF, compare itineraries, or get a second opinion.
+                </p>
+              </div>
+            }
+            footer={
+              <>
                 {isLoading && lastMessage?.role === "user" ? (
                   <div className="flex justify-start animate-agent-part-in">
                     <div className="shimmer-border max-w-[85%] space-y-1.5 rounded-xl border border-border/50 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
@@ -304,9 +293,9 @@ export function ConversationPanel({
                     </div>
                   </div>
                 ) : null}
-              </div>
-            </ScrollArea>
-          </>
+              </>
+            }
+          />
         )}
       </StreamElapsedSlot>
 

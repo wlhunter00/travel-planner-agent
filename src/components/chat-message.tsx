@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useState, useEffect, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
@@ -73,6 +73,61 @@ const mdComponents: Components = {
   ),
   td: ({ children }) => <td className="border border-border px-2 py-1">{children}</td>,
 };
+
+const THROTTLE_MS = 150;
+
+function useThrottledValue(value: string, ms: number, active: boolean): string {
+  const [throttled, setThrottled] = useState(value);
+  const lastRef = useRef(0);
+  const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(() => {
+    if (!active) {
+      setThrottled(value);
+      return;
+    }
+    const now = Date.now();
+    const elapsed = now - lastRef.current;
+    if (elapsed >= ms) {
+      lastRef.current = now;
+      setThrottled(value);
+    } else {
+      clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => {
+        lastRef.current = Date.now();
+        setThrottled(value);
+      }, ms - elapsed);
+    }
+    return () => clearTimeout(timerRef.current);
+  }, [value, ms, active]);
+
+  // Flush final value when streaming stops
+  useEffect(() => {
+    if (!active) setThrottled(value);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
+
+  return throttled;
+}
+
+const MemoizedMarkdown = memo(function MemoizedMarkdown({ text }: { text: string }) {
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+      {text}
+    </ReactMarkdown>
+  );
+});
+
+function TextPart({ text, isStreaming }: { text: string; isStreaming: boolean }) {
+  const displayText = useThrottledValue(text, THROTTLE_MS, isStreaming);
+  return (
+    <div className="flex w-full min-w-0 justify-start animate-agent-part-in">
+      <div className="min-w-0 max-w-[85%] rounded-2xl px-4 py-2.5 text-sm bg-muted">
+        <MemoizedMarkdown text={displayText} />
+      </div>
+    </div>
+  );
+}
 
 function extractUserText(message: UIMessage): string {
   return message.parts
@@ -190,15 +245,7 @@ export const ChatMessage = memo(function ChatMessage({
         <CollapsedStepsSummary parts={processParts} />
         {parts.map((part, i) => {
           if (!isTextUIPart(part) || !part.text?.trim()) return null;
-          return (
-            <div key={`text-${i}`} className="flex w-full min-w-0 justify-start animate-agent-part-in">
-              <div className="min-w-0 max-w-[85%] rounded-2xl px-4 py-2.5 text-sm bg-muted">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-                  {part.text}
-                </ReactMarkdown>
-              </div>
-            </div>
-          );
+          return <TextPart key={`text-${i}`} text={part.text} isStreaming={false} />;
         })}
       </div>
     );
@@ -210,13 +257,11 @@ export const ChatMessage = memo(function ChatMessage({
         if (isTextUIPart(part)) {
           if (!part.text?.trim()) return null;
           return (
-            <div key={`text-${i}`} className="flex w-full min-w-0 justify-start animate-agent-part-in">
-              <div className="min-w-0 max-w-[85%] rounded-2xl px-4 py-2.5 text-sm bg-muted">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-                  {part.text}
-                </ReactMarkdown>
-              </div>
-            </div>
+            <TextPart
+              key={`text-${i}`}
+              text={part.text}
+              isStreaming={isStreamingAssistant}
+            />
           );
         }
 

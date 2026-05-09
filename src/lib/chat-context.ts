@@ -87,6 +87,35 @@ export function capToolResult(result: unknown, maxBytes: number): unknown {
   return { _truncated: true, summary: `<oversized result, ${serialized.length} bytes elided>` };
 }
 
+const CLIENT_TOOL_OUTPUT_CAP = 8_000;
+
+/**
+ * Caps oversized tool outputs in the client-side messages array to bound
+ * browser memory. Call after persisting full data to the DB.  Returns the
+ * same array reference when nothing needed trimming.
+ */
+export function capMessagesToolOutputs(messages: UIMessage[]): UIMessage[] {
+  let changed = false;
+  const result = messages.map((m) => {
+    if (m.role !== "assistant") return m;
+    let partsChanged = false;
+    const newParts = m.parts.map((part) => {
+      const p = part as Record<string, unknown>;
+      if (!isToolPart(p)) return part;
+      const { value, key } = readToolOutput(p);
+      if (value === undefined || key === null) return part;
+      const capped = capToolResult(value, CLIENT_TOOL_OUTPUT_CAP);
+      if (capped === value) return part;
+      partsChanged = true;
+      return { ...p, [key]: capped } as typeof part;
+    });
+    if (!partsChanged) return m;
+    changed = true;
+    return { ...m, parts: newParts };
+  });
+  return changed ? result : messages;
+}
+
 function extractTopNames(output: unknown, limit: number): string[] {
   const names: string[] = [];
   const visit = (obj: unknown, depth: number) => {

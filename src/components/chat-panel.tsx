@@ -10,17 +10,19 @@ import {
   useMemo,
   type FormEvent,
   type KeyboardEvent,
-  type RefObject,
   type ClipboardEvent,
   type DragEvent,
 } from "react";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTripStore } from "@/lib/store";
-import { ChatMessage } from "@/components/chat-message";
+import {
+  VirtualizedMessageList,
+  type VirtualMessageListHandle,
+} from "@/components/virtualized-message-list";
 import { StreamElapsedSlot, StreamingTimeIndicator } from "@/components/streaming-time-indicator";
 import { RecommendationsPanel } from "@/components/recommendations-panel";
 import type { TripState, Phase } from "@/lib/types";
+import { capMessagesToolOutputs } from "@/lib/chat-context";
 import { Paperclip, X, FileText, Image as ImageIcon, Sparkles, Square } from "lucide-react";
 
 function downloadJSON(data: unknown, filename: string) {
@@ -57,23 +59,12 @@ function extractUpdateTripPayload(part: unknown): Record<string, unknown> | null
   return null;
 }
 
-function scrollToBottom(scrollRef: RefObject<HTMLDivElement | null>) {
-  requestAnimationFrame(() => {
-    const viewport = scrollRef.current?.querySelector<HTMLDivElement>(
-      '[data-slot="scroll-area-viewport"]'
-    );
-    if (viewport) {
-      viewport.scrollTop = viewport.scrollHeight;
-    }
-  });
-}
-
 export function ChatPanel({ tripId }: ChatPanelProps) {
   const trip = useTripStore((s) => s.trip);
   const updateTripState = useTripStore((s) => s.updateTripState);
   const setPhase = useTripStore((s) => s.setPhase);
   const setTripMeta = useTripStore((s) => s.setTripMeta);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<VirtualMessageListHandle>(null);
   const [inputValue, setInputValue] = useState("");
   const [streamTurn, setStreamTurn] = useState(0);
 
@@ -99,12 +90,26 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
 
   const isLoading = status === "streaming" || status === "submitted";
 
+  const messagesRef = useRef(messages);
+  useEffect(() => { messagesRef.current = messages; });
+
+  const processedToolCallsRef = useRef(new Set<string>());
+  useEffect(() => { processedToolCallsRef.current = new Set<string>(); }, [trip?.id]);
+
   useEffect(() => {
+    const seen = processedToolCallsRef.current;
     for (const message of messages) {
       if (message.role !== "assistant") continue;
       for (const part of message.parts) {
+        const p = part as Record<string, unknown>;
+        const tcId = p.toolCallId as string | undefined;
+        if (tcId && seen.has(tcId)) continue;
+
         const payload = extractUpdateTripPayload(part);
         if (!payload) continue;
+
+        if (tcId) seen.add(tcId);
+
         const args = payload as {
           tripState?: string;
           phase?: Phase;
@@ -166,7 +171,7 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
   useEffect(() => {
     if (didHydrateRef.current && messages.length > 0) {
       didHydrateRef.current = false;
-      scrollToBottom(scrollRef);
+      listRef.current?.scrollToBottom();
     }
   }, [messages.length]);
 
@@ -184,16 +189,16 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
     sendMessage({
       text: "Please review this imported itinerary against my preferences and flag anything I should change.",
     });
-    scrollToBottom(scrollRef);
+    listRef.current?.scrollToBottom();
   }, [trip?.id, trip?.state, trip?.chatHistory, status, sendMessage]);
 
   const buildSavePayload = useCallback(() => {
-    if (!trip || messages.length === 0) return null;
-    const latestTrip = useTripStore.getState().trip;
+    const currentMessages = messagesRef.current;
+    const currentTrip = useTripStore.getState().trip;
+    if (!currentTrip || currentMessages.length === 0) return null;
     return {
-      ...trip,
-      ...latestTrip,
-      chatHistory: messages.map((m) => ({
+      ...currentTrip,
+      chatHistory: currentMessages.map((m) => ({
         role: m.role,
         content: m.parts
           .filter((p): p is { type: "text"; text: string } => p.type === "text")
@@ -204,7 +209,8 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
       })),
       updatedAt: new Date().toISOString(),
     };
-  }, [trip, messages]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- reads from refs/store at call time
+  }, []);
 
   const saveChat = useCallback(async () => {
     const payload = buildSavePayload();
@@ -238,24 +244,24 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
   useEffect(() => {
     const prev = prevStatusRef.current;
     prevStatusRef.current = status;
-    if (status !== "ready" || messages.length === 0) return;
+    if (status !== "ready" || messagesRef.current.length === 0) return;
 
     // Streaming just finished — flush immediately, this is the danger boundary.
     if (prev === "streaming" || prev === "submitted") {
       void saveChat();
+      const trimmed = capMessagesToolOutputs(messagesRef.current);
+      if (trimmed !== messagesRef.current) setMessages(trimmed);
       return;
     }
     const timer = setTimeout(saveChat, 250);
     return () => clearTimeout(timer);
-  }, [status, messages.length, saveChat]);
+  }, [status, messages.length, saveChat, setMessages]);
 
   useEffect(() => {
     const handler = () => {
       const payload = buildSavePayload();
       if (!payload) return;
       const body = JSON.stringify(payload);
-      // keepalive supports PUT and survives unload but caps at ~64KB on most
-      // browsers. Surface the case so we know if the unload path is viable.
       if (body.length > 60_000) {
         console.warn("[chat-persist] beforeunload payload exceeds keepalive cap", {
           bodyKB: Math.round(body.length / 1024),
@@ -269,12 +275,13 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
           keepalive: true,
         });
       } catch {
-        // best-effort; nothing more we can do during unload
+        // best-effort
       }
     };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [buildSavePayload]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- buildSavePayload reads from refs
+  }, []);
 
   const lastMessage = messages[messages.length - 1];
 
@@ -307,7 +314,7 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
     sendMessage({ text: inputValue, files: fileList });
     setInputValue("");
     setAttachedFiles([]);
-    scrollToBottom(scrollRef);
+    listRef.current?.scrollToBottom();
   }
 
   function handleExportChat() {
@@ -394,53 +401,46 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
 
       <StreamElapsedSlot key={streamTurn} active={isLoading}>
         {(streamingElapsed) => (
-          <>
-            <ScrollArea className="flex-1 min-h-0 overflow-hidden" ref={scrollRef}>
-              <div className="p-4 space-y-4">
-                {messages.length === 0 && (
-                  <div className="text-center text-muted-foreground py-10">
-                    <p className="text-sm">Hi! I&apos;m your travel planning assistant.</p>
-                    <p className="text-xs mt-1">
-                      Tell me where you want to go and I&apos;ll help plan your trip.
-                    </p>
-                    {showRecsNudge && (
-                      <div className="mt-4 mx-auto max-w-xs">
-                        <button
-                          type="button"
-                          onClick={() => setRecsOpen(true)}
-                          className="w-full rounded-lg border border-dashed border-primary/30 bg-primary/5 px-3 py-2.5 text-left transition-colors hover:bg-primary/10 hover:border-primary/50"
-                        >
-                          <div className="flex items-center gap-2 text-xs font-medium text-primary">
-                            <Sparkles className="size-3.5" />
-                            Have recommendations from friends?
-                          </div>
-                          <p className="text-[11px] text-muted-foreground mt-1">
-                            Add URLs, notes, or PDFs — they&apos;ll appear in your trip overview
-                            and the agent will factor them in.
-                          </p>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setRecsNudgeDismissed(true)}
-                          className="text-[10px] text-muted-foreground hover:text-foreground mt-1 transition-colors"
-                        >
-                          Dismiss
-                        </button>
+          <VirtualizedMessageList
+            ref={listRef}
+            messages={messages as UIMessage[]}
+            isLoading={isLoading}
+            innerClassName="p-4"
+            emptyState={
+              <div className="text-center text-muted-foreground py-10">
+                <p className="text-sm">Hi! I&apos;m your travel planning assistant.</p>
+                <p className="text-xs mt-1">
+                  Tell me where you want to go and I&apos;ll help plan your trip.
+                </p>
+                {showRecsNudge && (
+                  <div className="mt-4 mx-auto max-w-xs">
+                    <button
+                      type="button"
+                      onClick={() => setRecsOpen(true)}
+                      className="w-full rounded-lg border border-dashed border-primary/30 bg-primary/5 px-3 py-2.5 text-left transition-colors hover:bg-primary/10 hover:border-primary/50"
+                    >
+                      <div className="flex items-center gap-2 text-xs font-medium text-primary">
+                        <Sparkles className="size-3.5" />
+                        Have recommendations from friends?
                       </div>
-                    )}
+                      <p className="text-[11px] text-muted-foreground mt-1">
+                        Add URLs, notes, or PDFs — they&apos;ll appear in your trip overview
+                        and the agent will factor them in.
+                      </p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRecsNudgeDismissed(true)}
+                      className="text-[10px] text-muted-foreground hover:text-foreground mt-1 transition-colors"
+                    >
+                      Dismiss
+                    </button>
                   </div>
                 )}
-
-                {messages.map((message) => (
-                  <ChatMessage
-                    key={message.id}
-                    message={message as UIMessage}
-                    isStreamingAssistant={
-                      isLoading && message.role === "assistant" && message.id === lastMessage?.id
-                    }
-                  />
-                ))}
-
+              </div>
+            }
+            footer={
+              <>
                 {isLoading && lastMessage?.role === "user" ? (
                   <div className="flex justify-start animate-agent-part-in">
                     <div className="shimmer-border max-w-[85%] space-y-1.5 rounded-xl border border-border/50 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
@@ -460,9 +460,9 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
                     </div>
                   </div>
                 ) : null}
-              </div>
-            </ScrollArea>
-          </>
+              </>
+            }
+          />
         )}
       </StreamElapsedSlot>
 
