@@ -12,7 +12,8 @@ import { ChatPanel } from "@/components/chat-panel";
 import { useTripStore } from "@/lib/store";
 import type { Trip } from "@/lib/types";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import type { ImportMeta } from "@/lib/types";
+import { ArrowLeft, Loader2, FileUp } from "lucide-react";
 
 interface TripPageClientProps {
   tripId: string;
@@ -62,6 +63,9 @@ export function TripPageClient({ tripId }: TripPageClientProps) {
     );
   }
 
+  const trip = useTripStore((s) => s.trip);
+  const importMeta = trip?.state?.import as ImportMeta | undefined;
+
   return (
     <div className="h-screen flex flex-col">
       <header className="flex items-center gap-3 px-4 py-2.5 border-b border-border/60 bg-background/80 backdrop-blur-md">
@@ -74,6 +78,18 @@ export function TripPageClient({ tripId }: TripPageClientProps) {
           <ArrowLeft className="size-3.5" />
           <span>Trips</span>
         </Button>
+
+        {importMeta && (
+          <div className="flex items-center gap-2 ml-auto text-xs text-muted-foreground">
+            <FileUp className="size-3 text-primary/70" />
+            <span>
+              Imported from <span className="font-medium text-foreground/80">{importMeta.sourceFilename}</span>
+              {importMeta.optionLabel && (
+                <span className="ml-1 text-primary/70">{importMeta.optionLabel}</span>
+              )}
+            </span>
+          </div>
+        )}
       </header>
 
       <ResizablePanelGroup orientation="horizontal" className="flex-1">

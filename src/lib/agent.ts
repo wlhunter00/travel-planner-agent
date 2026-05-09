@@ -9,6 +9,8 @@ export function buildSystemPrompt(context?: {
   isResuming?: boolean;
   /** YYYY-MM-DD in UTC — injected from the server so live tools never use past dates by mistake */
   todayUtc?: string;
+  /** True when the trip was created by importing an external itinerary document */
+  imported?: boolean;
 }) {
   const parts: string[] = [];
 
@@ -221,6 +223,34 @@ The user has shared recommendations from friends or personal research. These are
 - Use \`get_recommendations\` to browse recommendations for other categories not shown below
 ${phaseAction}
 ${context.recommendations}`);
+  }
+
+  if (context?.imported) {
+    parts.push(`\n## Imported Itinerary
+
+This trip was **not** planned from scratch — the user imported a document that someone else wrote for them. The trip state is already fully populated with cities, hotels, day plans, and activities extracted from that document.
+
+### First turn (no prior assistant messages in this trip)
+
+Produce a **structured critique** of the imported itinerary. Cover these axes in order:
+
+1. **Verdict** — One of: **Strong** (minor tweaks at most), **OK with fixes** (solid foundation but some real issues), or **Risky** (structural problems). Lead with this.
+2. **Driving load** — Use \`compute_routes\` in one batched call (up to 10 legs) to verify the document's stated driving times. Flag any day exceeding 3 hours behind the wheel, or any stated time that is materially wrong.
+3. **Pacing & rest** — Check whether Day 1 after arrival is light, whether there is at least 1 free/rest afternoon per 3–4 packed days, and whether walking-heavy days are followed by lighter ones.
+4. **Geographic coherence** — Flag any zigzag routing or illogical city order.
+5. **Must-see coverage** — Use \`web_search\` and/or \`search_places\` to spot famous experiences for this destination that the itinerary omits. Only flag genuine top-tier omissions, not obscure extras.
+6. **Advance-booking risks** — Call out anything that sells out weeks ahead (ferries, permits, Michelin restaurants, timed-entry tickets) and whether the doc already warns about it.
+7. **Fit to user preferences** — Compare the itinerary against the user's saved preferences (travel style, transport preference, dietary restrictions, avoids, activity interests, etc.). Cite specific preference fields by name when flagging mismatches (e.g. "Your preferences say you prefer minimal driving, but Day 5 has 4.5 hours on the road").
+8. **Hotel alternatives** — If the trip state contains \`import.alternatives.hotels\`, review whether any alternative looks like a better fit than the document's top pick for each base, given the user's preferences and your research.
+9. **3–5 concrete tweaks** — Actionable suggestions the user can accept or reject. Be specific ("Swap Day 3 and Day 4 to avoid backtracking" not "consider reordering").
+
+Do **not** call \`update_trip\` during the critique turn. Present findings only; wait for the user to say what changes they want.
+
+### Subsequent turns
+
+Drop the critique posture and behave like the normal planning agent. The imported trip state is the source of truth. All tools are available — \`update_trip\`, \`search_hotels\`, \`search_flights\`, phase transitions, restaurant research, etc. If the user says "swap the Day 4 hotel" or "add restaurants for Ribadeo," handle it exactly as you would for a trip planned from scratch.
+
+The 7-phase workflow and all other rules still apply once the user starts editing.`);
   }
 
   if (context?.tripSummary) {

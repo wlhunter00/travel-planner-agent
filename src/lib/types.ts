@@ -159,6 +159,25 @@ export interface ConfirmedHotel {
   backupBooking?: string;
 }
 
+export interface ImportedHotelAlternative {
+  name: string;
+  baseLabel: string;
+  description?: string;
+  rating?: string;
+  priceHint?: string;
+  bookingUrl?: string;
+}
+
+export interface ImportMeta {
+  sourceFilename: string;
+  importedAt: string;
+  batchId: string;
+  optionLabel?: string;
+  alternatives?: { hotels: ImportedHotelAlternative[] };
+  rawTextExcerpt?: string;
+  statedDriveTimes?: string[];
+}
+
 export interface TripState {
   destination: string;
   startDate: string;
@@ -171,6 +190,7 @@ export interface TripState {
   hotels: Hotel[];
   days: DayPlan[];
   notes?: string;
+  import?: ImportMeta;
   route?: {
     order: string[];
     transfer?: string;

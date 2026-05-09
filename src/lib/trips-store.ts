@@ -12,6 +12,8 @@ export interface TripIndex {
   coverImage?: string;
   createdAt: string;
   updatedAt: string;
+  importBatchId?: string;
+  importOptionLabel?: string;
 }
 
 export async function listTrips(userId: string): Promise<TripIndex[]> {
@@ -29,20 +31,29 @@ export async function listTrips(userId: string): Promise<TripIndex[]> {
       coverImage: true,
       createdAt: true,
       updatedAt: true,
+      state: true,
     },
   });
-  return rows.map((r) => ({
-    id: r.id,
-    name: r.name,
-    status: r.status,
-    phase: r.phase,
-    destination: r.destination,
-    startDate: r.startDate,
-    endDate: r.endDate,
-    coverImage: r.coverImage ?? undefined,
-    createdAt: r.createdAt.toISOString(),
-    updatedAt: r.updatedAt.toISOString(),
-  }));
+  return rows.map((r) => {
+    const state = r.state as Record<string, unknown> | null;
+    const importMeta = state?.import as
+      | { batchId?: string; optionLabel?: string }
+      | undefined;
+    return {
+      id: r.id,
+      name: r.name,
+      status: r.status,
+      phase: r.phase,
+      destination: r.destination,
+      startDate: r.startDate,
+      endDate: r.endDate,
+      coverImage: r.coverImage ?? undefined,
+      createdAt: r.createdAt.toISOString(),
+      updatedAt: r.updatedAt.toISOString(),
+      importBatchId: importMeta?.batchId,
+      importOptionLabel: importMeta?.optionLabel,
+    };
+  });
 }
 
 export async function getTrip(id: string, userId: string): Promise<Trip | null> {

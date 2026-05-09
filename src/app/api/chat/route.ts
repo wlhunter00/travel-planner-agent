@@ -248,6 +248,8 @@ export async function POST(req: Request) {
     : undefined;
   const recsText = recsTextRaw ? capRecommendationsText(recsTextRaw, 20_000) : undefined;
 
+  const isImported = !!(trip?.state as Record<string, unknown> | undefined)?.import;
+
   const systemPrompt = buildSystemPrompt({
     phase: trip?.phase,
     tripSummary: trip ? summarizeTrip(trip) : undefined,
@@ -255,6 +257,7 @@ export async function POST(req: Request) {
     recommendations: recsText || undefined,
     isResuming: trip?.chatHistory && trip.chatHistory.length > 0,
     todayUtc: new Date().toISOString().slice(0, 10),
+    imported: isImported,
   });
 
   const peek = await createPeekClient();
@@ -641,6 +644,12 @@ interface SummarizableTrip {
     cities: { name: string; country: string; days: number; startDate?: string; endDate?: string }[];
     hotels: { name: string; cityId: string; pricePerNight?: number; checkIn?: string; checkOut?: string }[];
     days: { date: string; cityId: string; daySummary?: string; activities: { title: string; type: string }[] }[];
+    import?: {
+      sourceFilename?: string;
+      optionLabel?: string;
+      statedDriveTimes?: string[];
+      alternatives?: { hotels: { name: string; baseLabel: string; rating?: string; priceHint?: string }[] };
+    };
   };
   phase: string;
 }
@@ -689,6 +698,24 @@ function summarizeTrip(trip: SummarizableTrip): string {
       const isFree = d.activities.length === 0
         || (d.activities.length === 1 && d.activities[0].type === "free_time");
       parts.push(`  - ${d.date.slice(5)}: ${isFree ? "FREE DAY" : summary}`);
+    }
+  }
+
+  if (s.import) {
+    if (s.import.sourceFilename) parts.push(`Imported from: ${s.import.sourceFilename}`);
+    if (s.import.optionLabel) parts.push(`Option: ${s.import.optionLabel}`);
+    if (s.import.statedDriveTimes?.length) {
+      parts.push("Stated drive times (from source doc):");
+      for (const dt of s.import.statedDriveTimes) {
+        parts.push(`  - ${dt}`);
+      }
+    }
+    if (s.import.alternatives?.hotels?.length) {
+      parts.push("Hotel alternatives (from source doc — not selected as top pick):");
+      for (const h of s.import.alternatives.hotels) {
+        const extra = [h.rating, h.priceHint].filter(Boolean).join(" · ");
+        parts.push(`  - ${h.name} (base: ${h.baseLabel})${extra ? ` — ${extra}` : ""}`);
+      }
     }
   }
 

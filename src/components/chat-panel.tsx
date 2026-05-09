@@ -157,12 +157,35 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- trip.chatHistory/setMessages omitted; see above
   }, [trip?.id]);
 
+  const didAutoSendRef = useRef(false);
+
+  useEffect(() => {
+    didAutoSendRef.current = false;
+  }, [trip?.id]);
+
   useEffect(() => {
     if (didHydrateRef.current && messages.length > 0) {
       didHydrateRef.current = false;
       scrollToBottom(scrollRef);
     }
   }, [messages.length]);
+
+  // Auto-trigger critique for imported trips that have no assistant response yet.
+  // The import route does NOT pre-seed chatHistory — instead we detect an imported
+  // trip with zero messages and fire the initial user prompt from the client.
+  useEffect(() => {
+    const isImported = !!(trip?.state as Record<string, unknown> | undefined)?.import;
+    if (!isImported || didAutoSendRef.current) return;
+    if (messages.length > 0) return;
+    if (status !== "ready") return;
+
+    didAutoSendRef.current = true;
+    setStreamTurn((t) => t + 1);
+    sendMessage({
+      text: "Please review this imported itinerary against my preferences and flag anything I should change.",
+    });
+    scrollToBottom(scrollRef);
+  }, [trip?.state, messages.length, status, sendMessage]);
 
   const buildSavePayload = useCallback(() => {
     if (!trip || messages.length === 0) return null;

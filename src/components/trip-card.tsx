@@ -4,7 +4,7 @@ import { Card, CardHeader, CardTitle, CardDescription } from "@/components/ui/ca
 import { Badge } from "@/components/ui/badge";
 import { PHASE_LABELS } from "@/lib/types";
 import type { Phase, TripStatus } from "@/lib/types";
-import { MapPin, ArrowRight } from "lucide-react";
+import { MapPin, ArrowRight, FileUp } from "lucide-react";
 
 interface TripCardProps {
   id: string;
@@ -15,6 +15,9 @@ interface TripCardProps {
   status: TripStatus;
   phase: Phase;
   coverImage?: string;
+  importBatchId?: string;
+  importOptionLabel?: string;
+  siblingCount?: number;
   onClick: () => void;
 }
 
@@ -26,7 +29,8 @@ const STATUS_STYLE: Record<TripStatus, string> = {
   archived: "bg-muted text-muted-foreground border-border",
 };
 
-export function TripCard({ name, destination, startDate, endDate, status, phase, coverImage, onClick }: TripCardProps) {
+export function TripCard({ name, destination, startDate, endDate, status, phase, coverImage, importBatchId, importOptionLabel, siblingCount, onClick }: TripCardProps) {
+  const isImported = !!importBatchId;
   const dateRange = startDate && endDate
     ? `${formatDate(startDate)} — ${formatDate(endDate)}`
     : "Dates TBD";
@@ -65,7 +69,18 @@ export function TripCard({ name, destination, startDate, endDate, status, phase,
           )}
           <p className="text-xs text-muted-foreground">{dateRange}</p>
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground/70">
-            <span>{PHASE_LABELS[phase]}</span>
+            {isImported && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-primary/80">
+                <FileUp className="size-2.5" />
+                Imported{importOptionLabel ? ` · ${importOptionLabel}` : ""}
+              </span>
+            )}
+            {isImported && siblingCount && siblingCount > 1 && (
+              <span className="text-[10px] text-muted-foreground/50">
+                ({siblingCount} options)
+              </span>
+            )}
+            {!isImported && <span>{PHASE_LABELS[phase]}</span>}
             <ArrowRight className="size-3 opacity-0 -translate-x-1 transition-all duration-300 group-hover:opacity-100 group-hover:translate-x-0 text-primary" />
           </div>
         </CardDescription>

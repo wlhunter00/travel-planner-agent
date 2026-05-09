@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { UserMenu } from "./user-menu";
 import { Logo } from "./logo";
 import type { Phase, TripStatus } from "@/lib/types";
-import { Plus } from "lucide-react";
+import { Plus, FileUp } from "lucide-react";
+import { ImportItineraryDialog } from "./import-itinerary-dialog";
 
 interface TripIndexEntry {
   id: string;
@@ -20,12 +21,15 @@ interface TripIndexEntry {
   coverImage?: string;
   createdAt: string;
   updatedAt: string;
+  importBatchId?: string;
+  importOptionLabel?: string;
 }
 
 export function TripList() {
   const router = useRouter();
   const [trips, setTrips] = useState<TripIndexEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [importOpen, setImportOpen] = useState(false);
 
   useEffect(() => {
     fetch("/api/trips")
@@ -67,10 +71,19 @@ export function TripList() {
               Plan, organize, and export travel itineraries with AI.
             </p>
           </div>
-          <div className="mt-8 animate-fade-up stagger-2">
+          <div className="mt-8 animate-fade-up stagger-2 flex gap-3">
             <Button onClick={handleNewTrip} size="lg" className="gap-2 font-medium">
               <Plus className="size-4" />
               New Trip
+            </Button>
+            <Button
+              onClick={() => setImportOpen(true)}
+              size="lg"
+              variant="outline"
+              className="gap-2 font-medium"
+            >
+              <FileUp className="size-4" />
+              Import Itinerary
             </Button>
           </div>
         </div>
@@ -93,30 +106,52 @@ export function TripList() {
             <p className="text-muted-foreground mb-8 max-w-xs mx-auto">
               Start planning your next adventure.
             </p>
-            <Button onClick={handleNewTrip} size="lg" className="gap-2">
-              <Plus className="size-4" />
-              Create your first trip
-            </Button>
+            <div className="flex gap-3 justify-center">
+              <Button onClick={handleNewTrip} size="lg" className="gap-2">
+                <Plus className="size-4" />
+                Create your first trip
+              </Button>
+              <Button
+                onClick={() => setImportOpen(true)}
+                size="lg"
+                variant="outline"
+                className="gap-2"
+              >
+                <FileUp className="size-4" />
+                Import Itinerary
+              </Button>
+            </div>
           </div>
         )}
 
         {!loading && trips.length > 0 && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {trips.map((trip, i) => (
-              <div
-                key={trip.id}
-                className="animate-fade-up"
-                style={{ animationDelay: `${i * 0.06}s` }}
-              >
-                <TripCard
-                  {...trip}
-                  onClick={() => router.push(`/trip/${trip.id}`)}
-                />
-              </div>
-            ))}
+            {trips.map((trip, i) => {
+              const siblingCount = trip.importBatchId
+                ? trips.filter((t) => t.importBatchId === trip.importBatchId).length
+                : undefined;
+              return (
+                <div
+                  key={trip.id}
+                  className="animate-fade-up"
+                  style={{ animationDelay: `${i * 0.06}s` }}
+                >
+                  <TripCard
+                    {...trip}
+                    siblingCount={siblingCount}
+                    onClick={() => router.push(`/trip/${trip.id}`)}
+                  />
+                </div>
+              );
+            })}
           </div>
         )}
       </main>
+
+      <ImportItineraryDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+      />
     </div>
   );
 }
