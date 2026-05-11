@@ -54,16 +54,22 @@ export const StreamingTimeIndicator = memo(function StreamingTimeIndicator({
 });
 
 /**
- * Remount with a new `key` (e.g. per user send) so elapsed seconds reset without sync setState in an effect.
+ * Increments elapsed while `active` is true.
+ * Pass `resetKey` (e.g. per-turn counter) so the elapsed display resets without remounting `children`.
  */
 export function StreamElapsedSlot({
   active,
+  resetKey,
   children,
 }: {
   active: boolean;
+  resetKey?: number | string;
   children: (elapsedSeconds: number) => ReactNode;
 }) {
   const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    setSeconds(0);
+  }, [resetKey]);
   useEffect(() => {
     if (!active) return;
     const id = window.setInterval(() => {

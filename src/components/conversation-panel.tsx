@@ -42,6 +42,7 @@ export function ConversationPanel({
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [listAtBottom, setListAtBottom] = useState(true);
 
   const transport = useMemo(
     () => new DefaultChatTransport({ api: "/api/conversations/chat" }),
@@ -220,10 +221,17 @@ export function ConversationPanel({
     attachedFiles.forEach((f) => dt.items.add(f));
     const fileList = dt.files.length > 0 ? dt.files : undefined;
 
+    const shouldStickToBottom = listRef.current?.isAtBottom() ?? true;
     sendMessage({ text: inputValue, files: fileList });
     setInputValue("");
     setAttachedFiles([]);
-    listRef.current?.scrollToBottom();
+    if (shouldStickToBottom) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          listRef.current?.scrollToBottom();
+        });
+      });
+    }
   }
 
   function handlePaste(e: ClipboardEvent<HTMLTextAreaElement>) {
@@ -244,7 +252,7 @@ export function ConversationPanel({
 
   return (
     <div
-      className="h-full flex flex-col"
+      className="relative h-full flex flex-col"
       onDragOver={(e) => {
         e.preventDefault();
         setDragActive(true);
@@ -252,13 +260,14 @@ export function ConversationPanel({
       onDragLeave={() => setDragActive(false)}
       onDrop={handleDrop}
     >
-      <StreamElapsedSlot key={streamTurn} active={isLoading}>
+      <StreamElapsedSlot resetKey={streamTurn} active={isLoading}>
         {(streamingElapsed) => (
           <VirtualizedMessageList
             ref={listRef}
             messages={messages as UIMessage[]}
             isLoading={isLoading}
-            innerClassName="p-4 max-w-3xl mx-auto"
+            onStickyChange={setListAtBottom}
+            innerClassName="max-w-3xl mx-auto"
             emptyState={
               <div className="text-center text-muted-foreground py-10">
                 <p className="text-sm">
@@ -298,6 +307,16 @@ export function ConversationPanel({
           />
         )}
       </StreamElapsedSlot>
+
+      {!listAtBottom && (
+        <button
+          type="button"
+          onClick={() => listRef.current?.scrollToBottom()}
+          className="absolute bottom-20 right-4 z-10 rounded-full border border-border bg-background/95 px-3 py-1.5 text-xs shadow-sm hover:bg-muted transition-colors"
+        >
+          Jump to latest
+        </button>
+      )}
 
       {dragActive && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
