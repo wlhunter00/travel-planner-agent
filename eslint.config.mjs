@@ -12,7 +12,31 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    ".claude/**",
+    "coverage/**",
   ]),
+  {
+    files: ["**/*.{test,spec}.{ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "@ai-sdk/openai",
+              message:
+                "Do not import LLM SDKs in tests; keep Vitest hermetic (pure modules, fixtures, mocks).",
+            },
+            {
+              name: "openai",
+              message:
+                "Do not import LLM SDKs in tests; keep Vitest hermetic (pure modules, fixtures, mocks).",
+            },
+          ],
+        },
+      ],
+    },
+  },
 ]);
 
 export default eslintConfig;

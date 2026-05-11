@@ -66,10 +66,21 @@ export function StreamElapsedSlot({
   resetKey?: number | string;
   children: (elapsedSeconds: number) => ReactNode;
 }) {
+  return (
+    <StreamElapsedInner key={String(resetKey ?? "default")} active={active}>
+      {children}
+    </StreamElapsedInner>
+  );
+}
+
+const StreamElapsedInner = memo(function StreamElapsedInner({
+  active,
+  children,
+}: {
+  active: boolean;
+  children: (elapsedSeconds: number) => ReactNode;
+}) {
   const [seconds, setSeconds] = useState(0);
-  useEffect(() => {
-    setSeconds(0);
-  }, [resetKey]);
   useEffect(() => {
     if (!active) return;
     const id = window.setInterval(() => {
@@ -79,4 +90,4 @@ export function StreamElapsedSlot({
   }, [active]);
   const elapsed = active ? seconds : 0;
   return <>{children(elapsed)}</>;
-}
+});

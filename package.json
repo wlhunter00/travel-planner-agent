@@ -7,6 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "verify-keys": "node scripts/verify-keys.mjs",
     "test:chat": "npx tsx scripts/test-chat.mts",
     "test:scenario": "npx tsx scripts/test-chat.mts --file",
@@ -55,10 +58,12 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/uuid": "^10.0.0",
+    "@vitest/coverage-v8": "^3.2.4",
     "eslint": "^9",
     "eslint-config-next": "16.1.7",
     "prisma": "^6.19.3",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.4"
   }
 }

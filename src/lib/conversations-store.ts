@@ -1,4 +1,5 @@
 import type { Conversation, ChatMessage } from "./types";
+import { isShrinkingChatSnapshot } from "./chat-history-save-guard";
 import { prisma } from "./prisma";
 import { StaleSaveError } from "./stale-save-error";
 
@@ -77,7 +78,7 @@ export async function saveConversation(
       if (existing) {
         const existingMessages =
           (existing.messages as unknown as ChatMessage[] | null) ?? [];
-        if (conv.messages.length < existingMessages.length) {
+        if (isShrinkingChatSnapshot(conv.messages.length, existingMessages.length)) {
           const serverConv = await tx.conversation.findFirst({
             where: { id: conv.id, userId },
           });

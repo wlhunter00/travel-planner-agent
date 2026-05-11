@@ -116,7 +116,7 @@ const CABIN_MAP: Record<string, number> = {
   first: 4,
 };
 
-function normalizeToIata(raw: string): { code: string | null; hint: string } {
+export function normalizeToIata(raw: string): { code: string | null; hint: string } {
   const trimmed = raw.trim();
   if (!trimmed) return { code: null, hint: "empty location" };
 
@@ -153,7 +153,7 @@ export interface MultiCitySearchParams {
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Returns an error message if the date is malformed or before today (UTC). */
-function validateNotPastDate(date: string, label: string): string | null {
+export function validateNotPastDate(date: string, label: string): string | null {
   const trimmed = date.trim();
   if (!ISO_DATE_RE.test(trimmed)) {
     return `${label} must be YYYY-MM-DD (got "${date}")`;

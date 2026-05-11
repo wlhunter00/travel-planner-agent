@@ -1,4 +1,5 @@
 import type { Trip, TripState, ChatMessage, Recommendation } from "./types";
+import { isShrinkingChatSnapshot } from "./chat-history-save-guard";
 import { prisma } from "./prisma";
 import { StaleSaveError } from "./stale-save-error";
 
@@ -110,7 +111,7 @@ export async function saveTrip(
     if (existing && !options.force) {
       const existingHistory = (existing.chatHistory as unknown as ChatMessage[] | null) ?? [];
       const incomingHistory = trip.chatHistory ?? [];
-      if (incomingHistory.length < existingHistory.length) {
+      if (isShrinkingChatSnapshot(incomingHistory.length, existingHistory.length)) {
         const serverTrip = await getTripWithinTx(tx, trip.id, userId);
         if (serverTrip) {
           throw new StaleSaveError({ kind: "trip", serverTrip });
