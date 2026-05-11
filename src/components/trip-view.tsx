@@ -11,6 +11,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Download, FileText, Calendar, Sparkles, MapPin, UtensilsCrossed, Wine, Building2, Compass, LayoutGrid, ShoppingBag, Train, StickyNote, ExternalLink, Link, MessageSquare, X, User, Trash2, ChevronDown } from "lucide-react";
 import { AddRecommendationForm } from "@/components/add-recommendation-form";
+import { TruncatedNotes } from "@/components/truncated-notes";
 import type { Recommendation, RecommendationCategory, ExtractedItem, SkeletonDay, ConfirmedHotel } from "@/lib/types";
 
 function CollapsibleSection({
@@ -82,6 +83,11 @@ export function TripView() {
   const hasContent = hasFlights || hasCities || hasHotels || hasDays || hasPlanningData;
 
   const cityMap = Object.fromEntries(state.cities.map((c) => [c.id, c.name]));
+
+  const stopCountOnDays = state.days.reduce(
+    (n, d) => n + d.activities.length,
+    0,
+  );
 
   return (
     <div className="h-full flex flex-col bg-background">
@@ -163,12 +169,21 @@ export function TripView() {
             <CollapsibleSection
               title="Day plans"
               icon={Calendar}
-              badge={hasDays ? undefined : "Overview"}
+              badge={
+                hasDays
+                  ? `${state.days.length} day${state.days.length !== 1 ? "s" : ""} · ${stopCountOnDays} stop${stopCountOnDays !== 1 ? "s" : ""}`
+                  : "Overview"
+              }
             >
               {hasDays ? (
                 <div className="space-y-7">
-                  {state.days.map((day) => (
-                    <DayTimeline key={day.id} day={day} cityName={cityMap[day.cityId]} />
+                  {state.days.map((day, idx) => (
+                    <DayTimeline
+                      key={day.id}
+                      day={day}
+                      dayIndex={idx}
+                      cityName={cityMap[day.cityId]}
+                    />
                   ))}
                 </div>
               ) : (
@@ -375,27 +390,6 @@ const SOURCE_ICON = {
   text: MessageSquare,
   file: FileText,
 } as const;
-
-function TruncatedNotes({ text }: { text: string }) {
-  const LIMIT = 100;
-  const [expanded, setExpanded] = useState(false);
-  const isLong = text.length > LIMIT;
-
-  return (
-    <p className="text-xs text-muted-foreground/80 mt-1 leading-relaxed">
-      {isLong && !expanded ? text.slice(0, LIMIT).trimEnd() + "…" : text}
-      {isLong && (
-        <button
-          type="button"
-          onClick={() => setExpanded(!expanded)}
-          className="ml-1 text-primary/60 hover:text-primary transition-colors"
-        >
-          {expanded ? "less" : "more"}
-        </button>
-      )}
-    </p>
-  );
-}
 
 function RecommendationItem({
   item,

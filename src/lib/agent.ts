@@ -194,7 +194,16 @@ Use this tool to push structured updates to the trip itinerary. Call it whenever
 
 The tripState field accepts partial updates — only include the fields you're changing.
 
-**Itinerary overview vs detailed day plans (left panel):** \`itinerarySkeleton\` (date + one-line \`plan\` per day) is what the user sees as "Day plans · **Overview**" — rough outlines only. The **detailed** schedule (times, ordered stops, meals, per–day trip breakdowns) appears in the same panel only when you also populate \`tripState.days\`: one \`DayPlan\` per date, each with a \`cityId\` that matches an existing city in \`cities\`, a \`daySummary\` string, and \`activities\` (typed POIs, meals, travel legs, etc.). If you only set \`itinerarySkeleton\` or only describe a Sintra / Cascais / Douro day in chat text, the **trip** UI will not show the stop-by-stop plan. When the user asks to "plan the day" or "day trip" in detail, **commit that structure via \`update_trip\` with \`days\`**, not just prose.`);
+**Itinerary overview vs detailed day plans (left panel):** \`itinerarySkeleton\` (date + one-line \`plan\` per day) is what the user sees as "Day plans · **Overview**" — rough outlines only. The **detailed** schedule (times, ordered stops, meals, per–day trip breakdowns) appears in the same panel only when you also populate \`tripState.days\`: one \`DayPlan\` per date, each with a \`cityId\` that matches an existing city in \`cities\`, a \`daySummary\` string, and \`activities\` (typed POIs, meals, travel legs, etc.). If you only set \`itinerarySkeleton\` or only describe a Sintra / Cascais / Douro day in chat text, the **trip** UI will not show the stop-by-stop plan. When the user asks to "plan the day" or "day trip" in detail, **commit that structure via \`update_trip\` with \`days\`**, not just prose.
+
+When you populate \`tripState.days\`:
+
+- Each **activity** you save MUST include a real **title** (the venue or experience name — at least **2 characters**). Never persist a row that is only a generic type word like \`sightseeing\`, \`viewpoint\`, or \`hotel\`.
+- **type** MUST be exactly one of: \`poi\` \| \`meal\` \| \`tour\` \| \`travel\` \| \`free_time\` \| \`experience\`.
+- Prefer **address**, **startTime**, **duration**, and **notes** whenever you know them — the left-panel UI reads these fields verbatim.
+- Before saving a researched stop to \`activities\`, call \`get_place_details\` (or use search results already in hand) so you can populate **address**, **lat**, **lng**, **rating**, and **photoUrl** whenever possible.
+
+A stop saved with **only** a vague type label and no identifiable place name never counts as ready for the traveler UI — correct it before calling \`update_trip\`.`);
 
   if (context?.todayUtc) {
     parts.push(`\n## Today's date (live pricing & bookings)\n**Today is ${context.todayUtc}** (UTC calendar date). Never set \`update_trip\` \`startDate\`/\`endDate\`, any flight segment date, or lodging \`checkIn\`/\`checkOut\` to a day **before** today. If the user's timeframe is ambiguous or already partly in the past (e.g. a month that has started), choose a **forward** sample window (rest of the month, late-month strip, or next year if they meant a future year) **before** your first \`search_flights\`, \`search_multi_city_flights\`, \`search_hotels\`, \`search_vacation_rentals\`, or \`search_airbnb\` call — avoid wasting steps on dates the tools will reject.`);
@@ -341,7 +350,9 @@ export const updateTripSchema = z.object({
               z.object({
                 id: z.string(),
                 type: z.enum(["poi", "meal", "tour", "travel", "free_time", "experience"]),
-                title: z.string(),
+                title: z
+                  .string()
+                  .min(2, "Every activity needs a real name — not only a vague type keyword"),
                 startTime: z.string().optional(),
                 endTime: z.string().optional(),
                 duration: z.string().optional(),
@@ -356,6 +367,14 @@ export const updateTripSchema = z.object({
                 notes: z.string().optional(),
                 recommendationSource: z.enum(["agent_research", "friend_recommendation", "user_choice"]).optional()
                   .describe("Where this pick originated: your own research, a friend recommendation, or explicit user choice"),
+                sourceCitations: z
+                  .array(
+                    z.object({
+                      label: z.string(),
+                      url: z.string(),
+                    }),
+                  )
+                  .optional(),
               })
             ),
           })

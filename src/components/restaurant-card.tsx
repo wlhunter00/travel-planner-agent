@@ -1,6 +1,7 @@
 "use client";
 
 import { Card } from "@/components/ui/card";
+import { sanitizePhotoUrl } from "@/lib/activity-meta";
 
 interface RestaurantCardProps {
   name: string;
@@ -20,7 +21,11 @@ export function RestaurantCard({ name, cuisine, address, rating, priceLevel, pho
     <Card className="p-3">
       <div className="flex items-start gap-3">
         {photoUrl && (
-          <img src={photoUrl} alt={name} className="w-14 h-14 rounded object-cover shrink-0" />
+          <img
+            src={sanitizePhotoUrl(photoUrl) ?? photoUrl}
+            alt={name}
+            className="w-14 h-14 rounded object-cover shrink-0"
+          />
         )}
         <div className="min-w-0 flex-1">
           <p className="font-medium text-sm">{name}</p>

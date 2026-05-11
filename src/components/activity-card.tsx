@@ -1,91 +1,106 @@
 "use client";
 
-import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { ExternalLink, MapPin } from "lucide-react";
+import { TruncatedNotes } from "@/components/truncated-notes";
+import { SourceChip, CitationsFooter } from "@/components/source-chip";
 import type { Activity } from "@/lib/types";
-import { Star, ExternalLink, Clock, MapPin } from "lucide-react";
+import { useTripStore } from "@/lib/store";
+import {
+  ACTIVITY_META,
+  ACTIVITY_TYPE_STYLE,
+  normalizeActivityType,
+} from "@/lib/activity-meta";
 
-const TYPE_LABELS: Record<string, string> = {
-  poi: "Attraction",
-  meal: "Meal",
-  tour: "Tour",
-  travel: "Transit",
-  free_time: "Free Time",
-  experience: "Experience",
-};
+interface ActivityCardProps {
+  activity: Activity;
+  staggerClass?: string;
+}
 
-const TYPE_STYLE: Record<string, string> = {
-  poi: "bg-primary/8 text-primary border-primary/15",
-  meal: "bg-warm-terracotta/8 text-warm-terracotta border-warm-terracotta/15",
-  tour: "bg-warm-sage/8 text-warm-sage border-warm-sage/15",
-  travel: "bg-muted text-muted-foreground border-border/50",
-  free_time: "bg-warm-cream/20 text-warm-amber border-warm-amber/15",
-  experience: "bg-chart-4/8 text-chart-4 border-chart-4/15",
-};
+export function ActivityCard({ activity, staggerClass = "" }: ActivityCardProps) {
+  const recommendations = useTripStore((s) => s.trip?.recommendations ?? []);
+  const resolvedType = normalizeActivityType(activity.type);
+  const meta = ACTIVITY_META[resolvedType];
+  const Icon = meta.icon;
 
-export function ActivityCard({ activity }: { activity: Activity }) {
+  const title =
+    activity.title?.trim().length >= 2
+      ? activity.title.trim()
+      : meta.fallbackTitle;
+
+  const style = ACTIVITY_TYPE_STYLE[resolvedType];
+  const isShortNote =
+    activity.notes && activity.notes.length > 0 && activity.notes.length <= 60;
+
+  const currencySym =
+    activity.currency === "USD" || !activity.currency ? "$" : activity.currency;
+
   return (
-    <Card className="p-3.5 border-border/40 transition-all duration-200 hover:border-border/70">
-      <div className="flex items-start gap-3">
-        {activity.photoUrl && (
-          <img
-            src={activity.photoUrl}
-            alt={activity.title}
-            className="w-16 h-16 rounded-lg object-cover shrink-0"
-          />
-        )}
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <p className="font-medium text-sm truncate">{activity.title}</p>
-            <Badge
-              variant="outline"
-              className={`text-[10px] shrink-0 border ${TYPE_STYLE[activity.type] || "bg-muted text-muted-foreground"}`}
-            >
-              {TYPE_LABELS[activity.type] || activity.type}
-            </Badge>
-          </div>
-          <div className="flex items-center gap-3 mt-1.5 text-xs text-muted-foreground/70">
-            {activity.startTime && (
-              <span className="flex items-center gap-1">
-                <Clock className="size-3" />
-                {activity.startTime}
-              </span>
-            )}
-            {activity.duration && <span>{activity.duration}</span>}
-            {activity.rating && (
-              <span className="flex items-center gap-0.5">
-                <Star className="size-3 text-warm-gold fill-warm-gold" />
-                {activity.rating}
-              </span>
-            )}
-            {activity.price != null && activity.price > 0 && (
-              <span className="font-medium text-foreground/70">
-                {activity.currency === "USD" ? "$" : activity.currency || "$"}{activity.price}
-              </span>
-            )}
-          </div>
-          {activity.address && (
-            <p className="flex items-center gap-1 text-xs text-muted-foreground/50 mt-1 truncate">
-              <MapPin className="size-3 shrink-0" />
-              {activity.address}
-            </p>
-          )}
-          {activity.notes && (
-            <p className="text-xs mt-1.5 text-muted-foreground/80 leading-relaxed">{activity.notes}</p>
-          )}
-          {activity.bookingUrl && (
-            <a
-              href={activity.bookingUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1 text-xs text-primary/80 hover:text-primary transition-colors mt-1.5"
-            >
-              Book
-              <ExternalLink className="size-3" />
-            </a>
-          )}
-        </div>
+    <div
+      className={`group/item flex items-start gap-2.5 rounded-lg border border-border/50 bg-muted/30 px-3 py-2.5 transition-colors hover:bg-muted/40 animate-fade-up ${staggerClass}`}
+    >
+      <div className={`mt-0.5 rounded-md p-1.5 ${style}`}>
+        <Icon className="size-3" aria-hidden />
       </div>
-    </Card>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2 flex-wrap">
+          <span className="text-sm font-medium">{title}</span>
+          {activity.startTime && (
+            <span className="font-mono tabular-nums text-[10px] text-muted-foreground">
+              {activity.startTime}
+            </span>
+          )}
+          {activity.duration && (
+            <span className="text-[10px] text-muted-foreground">
+              {activity.duration}
+            </span>
+          )}
+          {activity.rating != null && (
+            <span className="text-[10px] text-muted-foreground font-medium">
+              {activity.rating}★
+            </span>
+          )}
+          {typeof activity.price === "number" &&
+            activity.price > 0 && (
+              <span className="text-[10px] text-muted-foreground font-medium">
+                {currencySym}
+                {activity.price}
+              </span>
+            )}
+          {isShortNote && (
+            <span className="text-[10px] text-muted-foreground">
+              {activity.notes}
+            </span>
+          )}
+          <SourceChip activity={activity} recommendations={recommendations} />
+        </div>
+
+        {activity.address && (
+          <p className="text-xs text-muted-foreground mt-0.5">
+            <MapPin className="size-3 inline mr-0.5 -mt-0.5" aria-hidden />
+            {activity.address}
+          </p>
+        )}
+
+        {activity.notes && !isShortNote && (
+          <TruncatedNotes text={activity.notes} />
+        )}
+
+        {activity.bookingUrl && (
+          <a
+            href={activity.bookingUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-[10px] text-primary/60 hover:text-primary transition-colors mt-1"
+          >
+            <ExternalLink className="size-2.5" aria-hidden />
+            Book
+          </a>
+        )}
+
+        {activity.sourceCitations && activity.sourceCitations.length > 0 && (
+          <CitationsFooter citations={activity.sourceCitations} />
+        )}
+      </div>
+    </div>
   );
 }

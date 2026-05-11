@@ -3,6 +3,7 @@
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { Hotel } from "@/lib/types";
+import { sanitizePhotoUrl } from "@/lib/activity-meta";
 import { Star, ExternalLink, Award } from "lucide-react";
 
 const SOURCE_STYLE: Record<string, string> = {
@@ -22,7 +23,7 @@ export function HotelCard({ hotel }: { hotel: Hotel }) {
       {hotel.photoUrl && (
         <div className="h-32 bg-muted overflow-hidden">
           <img
-            src={hotel.photoUrl}
+            src={sanitizePhotoUrl(hotel.photoUrl) ?? hotel.photoUrl}
             alt={hotel.name}
             className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
           />

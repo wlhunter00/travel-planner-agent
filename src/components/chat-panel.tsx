@@ -22,6 +22,7 @@ import {
 import { StreamElapsedSlot, StreamingTimeIndicator } from "@/components/streaming-time-indicator";
 import { RecommendationsPanel } from "@/components/recommendations-panel";
 import type { ChatMessage, Phase, Trip, TripState } from "@/lib/types";
+import { sanitizePartialTripState } from "@/lib/trip-state-sanitize";
 import { capMessagesToolOutputs } from "@/lib/chat-context";
 import { useTripChannel, type SavedBroadcast } from "@/lib/use-trip-channel";
 import { Paperclip, X, FileText, Image as ImageIcon, Sparkles, Square } from "lucide-react";
@@ -166,9 +167,11 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
           try {
             const parsed =
               typeof args.tripState === "string" ? JSON.parse(args.tripState) : args.tripState;
-            updateTripState(parsed as Partial<TripState>);
-          } catch {
-            // ignore
+            updateTripState(
+              sanitizePartialTripState(parsed as Partial<TripState>),
+            );
+          } catch (e) {
+            console.error("[ChatPanel] Failed to parse or sanitize update_trip tripState", e);
           }
         }
         if (args.phase) setPhase(args.phase);

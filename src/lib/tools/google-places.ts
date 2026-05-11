@@ -1,3 +1,5 @@
+import { placesPhotoProxyUrl } from "@/lib/places-photo-url";
+
 interface PlaceSearchParams {
   query: string;
   location?: string;
@@ -83,7 +85,7 @@ export async function searchPlaces(params: PlaceSearchParams): Promise<{ places:
       lat: (p.location as Record<string, number>)?.latitude,
       lng: (p.location as Record<string, number>)?.longitude,
       photoUrl: (p.photos as Record<string, string>[])?.[0]?.name
-        ? `https://places.googleapis.com/v1/${(p.photos as Record<string, string>[])[0].name}/media?maxHeightPx=300&key=${apiKey}`
+        ? placesPhotoProxyUrl((p.photos as Record<string, string>[])[0].name, 300)
         : undefined,
     }));
 
@@ -125,7 +127,7 @@ export async function getPlaceDetails(params: { placeId: string }): Promise<Plac
       priceLevel: p.priceLevel ? parsePriceLevel(p.priceLevel) : undefined,
       hours: p.currentOpeningHours?.weekdayDescriptions,
       photoUrl: p.photos?.[0]?.name
-        ? `https://places.googleapis.com/v1/${p.photos[0].name}/media?maxHeightPx=400&key=${apiKey}`
+        ? placesPhotoProxyUrl(p.photos[0].name as string, 400)
         : undefined,
       reviews: (p.reviews || []).slice(0, 3).map((r: Record<string, unknown>) => ({
         author: (r.authorAttribution as Record<string, string>)?.displayName || "Anonymous",
