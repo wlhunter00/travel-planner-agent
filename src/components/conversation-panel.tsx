@@ -19,9 +19,31 @@ import {
   type VirtualMessageListHandle,
 } from "@/components/virtualized-message-list";
 import { StreamElapsedSlot, StreamingTimeIndicator } from "@/components/streaming-time-indicator";
-import type { ChatMessage as ChatMsg } from "@/lib/types";
+import type { ChatMessage as ChatMsg, Conversation } from "@/lib/types";
 import { capMessagesToolOutputs } from "@/lib/chat-context";
+import { useConversationChannel, type SavedBroadcast } from "@/lib/use-trip-channel";
 import { Paperclip, X, FileText, Image as ImageIcon, Square } from "lucide-react";
+
+function signatureOf(msgs: ReadonlyArray<{ id?: string | null }>): string {
+  if (msgs.length === 0) return "0";
+  return `${msgs.length}:${msgs[msgs.length - 1]?.id ?? ""}`;
+}
+
+function chatHistoryToUiMessages(history: ChatMsg[]): UIMessage[] {
+  return history.map((m) => ({
+    id: m.id || crypto.randomUUID(),
+    role: m.role as "user" | "assistant",
+    parts:
+      m.parts && m.parts.length > 0
+        ? (m.parts as UIMessage["parts"])
+        : [{ type: "text" as const, text: m.content }],
+  }));
+}
+
+type SaveBanner = {
+  kind: "remote-conflict" | "remote-sync";
+  text: string;
+} | null;
 
 interface ConversationPanelProps {
   conversationId: string;
@@ -38,6 +60,7 @@ export function ConversationPanel({
   const [inputValue, setInputValue] = useState("");
   const [streamTurn, setStreamTurn] = useState(0);
   const [title, setTitle] = useState(initialTitle);
+  const [banner, setBanner] = useState<SaveBanner>(null);
 
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -59,6 +82,24 @@ export function ConversationPanel({
   const messagesRef = useRef(messages);
   useEffect(() => { messagesRef.current = messages; });
 
+  const isLoadingRef = useRef(isLoading);
+  useEffect(() => { isLoadingRef.current = isLoading; }, [isLoading]);
+
+  // Server-agreed signature for the persisted messages array; saves bail when
+  // this hasn't changed (prevents mount/HMR stale-snapshot writes).
+  const lastSavedSignatureRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    lastSavedSignatureRef.current = null;
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (!banner) return;
+    const timeoutMs = banner.kind === "remote-sync" ? 2000 : 5000;
+    const timer = setTimeout(() => setBanner(null), timeoutMs);
+    return () => clearTimeout(timer);
+  }, [banner]);
+
   const didHydrateRef = useRef(false);
 
   useEffect(() => {
@@ -67,17 +108,16 @@ export function ConversationPanel({
 
   useEffect(() => {
     if (initialMessages.length > 0 && messages.length === 0) {
-      setMessages(
-        initialMessages.map((m) => ({
-          id: m.id || crypto.randomUUID(),
-          role: m.role as "user" | "assistant",
-          parts:
-            m.parts && m.parts.length > 0
-              ? (m.parts as UIMessage["parts"])
-              : [{ type: "text" as const, text: m.content }],
-        }))
-      );
+      const hydrated = chatHistoryToUiMessages(initialMessages);
+      setMessages(hydrated);
+      lastSavedSignatureRef.current = signatureOf(hydrated);
       didHydrateRef.current = true;
+    } else if (messages.length > 0) {
+      // HMR/remount with preserved useChat state — seed signature from
+      // current in-memory messages so the next periodic save bails.
+      lastSavedSignatureRef.current = signatureOf(messages);
+    } else {
+      lastSavedSignatureRef.current = "0";
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
@@ -89,9 +129,52 @@ export function ConversationPanel({
     }
   }, [messages.length]);
 
+  const adoptServerConversation = useCallback(
+    (server: Conversation, reason: "conflict" | "remote-sync") => {
+      const uiMessages = chatHistoryToUiMessages(server.messages ?? []);
+      setMessages(uiMessages);
+      lastSavedSignatureRef.current = signatureOf(uiMessages);
+      if (server.title) setTitle(server.title);
+      if (reason === "conflict") {
+        setBanner({
+          kind: "remote-conflict",
+          text: "Another tab updated this chat; your view has been refreshed.",
+        });
+      } else {
+        setBanner({ kind: "remote-sync", text: "Synced from another tab" });
+      }
+    },
+    [setMessages],
+  );
+
+  const { broadcastSaved } = useConversationChannel(
+    conversationId,
+    useCallback(
+      (msg: SavedBroadcast) => {
+        if (isLoadingRef.current) return;
+        const local = messagesRef.current;
+        const remote = msg.history;
+        if (remote.length < local.length) return;
+        if (remote.length === local.length) {
+          const localLast = local[local.length - 1];
+          const remoteLast = remote[remote.length - 1];
+          if (!localLast || !remoteLast) return;
+          if (localLast.id === remoteLast.id) return;
+        }
+        const uiMessages = chatHistoryToUiMessages(remote);
+        setMessages(uiMessages);
+        lastSavedSignatureRef.current = signatureOf(uiMessages);
+        setBanner({ kind: "remote-sync", text: "Synced from another tab" });
+      },
+      [setMessages],
+    ),
+  );
+
   const saveConversation = useCallback(
     async (msgs: UIMessage[]) => {
-      const chatHistory = msgs.map((m) => ({
+      const signature = signatureOf(msgs);
+      if (signature === lastSavedSignatureRef.current) return;
+      const chatHistory: ChatMsg[] = msgs.map((m) => ({
         role: m.role,
         content: m.parts
           .filter((p): p is { type: "text"; text: string } => p.type === "text")
@@ -100,14 +183,36 @@ export function ConversationPanel({
         id: m.id,
         parts: m.parts.map((p) => ({ ...p })),
       }));
+      const updatedAt = new Date().toISOString();
 
-      await fetch("/api/conversations", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: conversationId, messages: chatHistory }),
-      });
+      try {
+        const res = await fetch("/api/conversations", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: conversationId, messages: chatHistory }),
+        });
+        if (res.ok) {
+          lastSavedSignatureRef.current = signature;
+          broadcastSaved(chatHistory, updatedAt);
+          return;
+        }
+        if (res.status === 409) {
+          try {
+            const data = (await res.json()) as { conversation?: Conversation };
+            if (data?.conversation) {
+              adoptServerConversation(data.conversation, "conflict");
+            }
+          } catch (e) {
+            console.warn("[chat-persist] conversation 409 parse failed", e);
+          }
+          return;
+        }
+        console.warn("[chat-persist] conversation save failed", { status: res.status });
+      } catch (e) {
+        console.warn("[chat-persist] conversation save error", e);
+      }
     },
-    [conversationId]
+    [conversationId, broadcastSaved, adoptServerConversation]
   );
 
   const autoTitle = useCallback(
@@ -170,6 +275,8 @@ export function ConversationPanel({
     const handler = () => {
       const currentMessages = messagesRef.current;
       if (currentMessages.length === 0) return;
+      const signature = signatureOf(currentMessages);
+      if (signature === lastSavedSignatureRef.current) return;
       const chatHistory = currentMessages.map((m) => ({
         role: m.role,
         content: m.parts
@@ -334,6 +441,20 @@ export function ConversationPanel({
         <div className="mx-3 mb-0 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
           <p className="font-medium">Something went wrong</p>
           <p className="mt-0.5 opacity-90">{error.message}</p>
+        </div>
+      )}
+
+      {banner && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`mb-0 max-w-3xl mx-auto w-full rounded-md border px-3 py-1.5 text-[11px] animate-fade-up ${
+            banner.kind === "remote-conflict"
+              ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+              : "border-border/60 bg-muted/40 text-muted-foreground"
+          }`}
+        >
+          {banner.text}
         </div>
       )}
 

@@ -21,8 +21,9 @@ import {
 } from "@/components/virtualized-message-list";
 import { StreamElapsedSlot, StreamingTimeIndicator } from "@/components/streaming-time-indicator";
 import { RecommendationsPanel } from "@/components/recommendations-panel";
-import type { TripState, Phase } from "@/lib/types";
+import type { ChatMessage, Phase, Trip, TripState } from "@/lib/types";
 import { capMessagesToolOutputs } from "@/lib/chat-context";
+import { useTripChannel, type SavedBroadcast } from "@/lib/use-trip-channel";
 import { Paperclip, X, FileText, Image as ImageIcon, Sparkles, Square } from "lucide-react";
 
 function downloadJSON(data: unknown, filename: string) {
@@ -59,14 +60,37 @@ function extractUpdateTripPayload(part: unknown): Record<string, unknown> | null
   return null;
 }
 
+function signatureOf(msgs: ReadonlyArray<{ id?: string | null }>): string {
+  if (msgs.length === 0) return "0";
+  return `${msgs.length}:${msgs[msgs.length - 1]?.id ?? ""}`;
+}
+
+function chatHistoryToUiMessages(history: ChatMessage[]): UIMessage[] {
+  return history.map((m) => ({
+    id: m.id || crypto.randomUUID(),
+    role: m.role as "user" | "assistant",
+    parts:
+      m.parts && m.parts.length > 0
+        ? (m.parts as UIMessage["parts"])
+        : [{ type: "text" as const, text: m.content }],
+  }));
+}
+
+type SaveBanner = {
+  kind: "remote-conflict" | "remote-sync";
+  text: string;
+} | null;
+
 export function ChatPanel({ tripId }: ChatPanelProps) {
   const trip = useTripStore((s) => s.trip);
+  const setTrip = useTripStore((s) => s.setTrip);
   const updateTripState = useTripStore((s) => s.updateTripState);
   const setPhase = useTripStore((s) => s.setPhase);
   const setTripMeta = useTripStore((s) => s.setTripMeta);
   const listRef = useRef<VirtualMessageListHandle>(null);
   const [inputValue, setInputValue] = useState("");
   const [streamTurn, setStreamTurn] = useState(0);
+  const [banner, setBanner] = useState<SaveBanner>(null);
 
   const recCount = trip?.recommendations?.length ?? 0;
   const isBigPicture = !trip?.phase || trip.phase === "big_picture";
@@ -93,6 +117,25 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
 
   const messagesRef = useRef(messages);
   useEffect(() => { messagesRef.current = messages; });
+
+  const isLoadingRef = useRef(isLoading);
+  useEffect(() => { isLoadingRef.current = isLoading; }, [isLoading]);
+
+  // Tracks the signature of the chatHistory most recently agreed-upon with the
+  // server. Saves bail when the current signature matches; bumped on hydrate,
+  // successful save, 409 adoption, and remote-tab broadcast.
+  const lastSavedSignatureRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    lastSavedSignatureRef.current = null;
+  }, [tripId]);
+
+  useEffect(() => {
+    if (!banner) return;
+    const timeoutMs = banner.kind === "remote-sync" ? 2000 : 5000;
+    const timer = setTimeout(() => setBanner(null), timeoutMs);
+    return () => clearTimeout(timer);
+  }, [banner]);
 
   const processedToolCallsRef = useRef(new Set<string>());
   useEffect(() => { processedToolCallsRef.current = new Set<string>(); }, [trip?.id]);
@@ -147,17 +190,17 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
 
   useEffect(() => {
     if (trip?.chatHistory && trip.chatHistory.length > 0 && messages.length === 0) {
-      setMessages(
-        trip.chatHistory.map((m) => ({
-          id: m.id || crypto.randomUUID(),
-          role: m.role as "user" | "assistant",
-          parts:
-            m.parts && m.parts.length > 0
-              ? (m.parts as UIMessage["parts"])
-              : [{ type: "text" as const, text: m.content }],
-        }))
-      );
+      const hydrated = chatHistoryToUiMessages(trip.chatHistory);
+      setMessages(hydrated);
+      lastSavedSignatureRef.current = signatureOf(hydrated);
       didHydrateRef.current = true;
+    } else if (messages.length > 0) {
+      // HMR/remount with preserved useChat state — seed the signature from
+      // the in-memory messages so the next periodic save bails until the
+      // user actually changes something.
+      lastSavedSignatureRef.current = signatureOf(messages);
+    } else if (trip) {
+      lastSavedSignatureRef.current = "0";
     }
   // Intentionally hydrate once per trip id when local messages are empty (avoid clobbering live chat).
   // eslint-disable-next-line react-hooks/exhaustive-deps -- trip.chatHistory/setMessages omitted; see above
@@ -207,15 +250,61 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
           .join(""),
         id: m.id,
         parts: m.parts.map((p) => ({ ...p })),
-      })),
+      })) as ChatMessage[],
       updatedAt: new Date().toISOString(),
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- reads from refs/store at call time
   }, []);
+
+  const adoptServerTrip = useCallback(
+    (server: Trip, reason: "conflict" | "remote-sync") => {
+      setTrip(server);
+      const uiMessages = chatHistoryToUiMessages(server.chatHistory ?? []);
+      setMessages(uiMessages);
+      lastSavedSignatureRef.current = signatureOf(uiMessages);
+      if (reason === "conflict") {
+        setBanner({
+          kind: "remote-conflict",
+          text: "Another tab updated this chat; your view has been refreshed.",
+        });
+      } else {
+        setBanner({ kind: "remote-sync", text: "Synced from another tab" });
+      }
+    },
+    [setTrip, setMessages],
+  );
+
+  const { broadcastSaved } = useTripChannel(
+    tripId,
+    useCallback(
+      (msg: SavedBroadcast) => {
+        // Don't clobber an in-flight local stream; the eventual save will hit
+        // the server's 409 path and adopt the merged state then.
+        if (isLoadingRef.current) return;
+
+        const local = messagesRef.current;
+        const remote = msg.history;
+        if (remote.length < local.length) return;
+        if (remote.length === local.length) {
+          const localLast = local[local.length - 1];
+          const remoteLast = remote[remote.length - 1];
+          if (!localLast || !remoteLast) return;
+          if (localLast.id === remoteLast.id) return;
+        }
+
+        const uiMessages = chatHistoryToUiMessages(remote);
+        setMessages(uiMessages);
+        lastSavedSignatureRef.current = signatureOf(uiMessages);
+        setBanner({ kind: "remote-sync", text: "Synced from another tab" });
+      },
+      [setMessages],
+    ),
+  );
 
   const saveChat = useCallback(async () => {
     const payload = buildSavePayload();
     if (!payload) return;
+    const signature = signatureOf(messagesRef.current);
+    if (signature === lastSavedSignatureRef.current) return;
     const body = JSON.stringify(payload);
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
@@ -224,7 +313,20 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
           headers: { "Content-Type": "application/json" },
           body,
         });
-        if (res.ok) return;
+        if (res.ok) {
+          lastSavedSignatureRef.current = signature;
+          broadcastSaved(payload.chatHistory, payload.updatedAt);
+          return;
+        }
+        if (res.status === 409) {
+          try {
+            const data = (await res.json()) as { trip?: Trip };
+            if (data?.trip) adoptServerTrip(data.trip, "conflict");
+          } catch (e) {
+            console.warn("[chat-persist] 409 parse failed", e);
+          }
+          return;
+        }
         if (res.status === 413 || attempt === 1) {
           console.warn("[chat-persist] save failed", { status: res.status });
           return;
@@ -237,7 +339,7 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
       }
       await new Promise((r) => setTimeout(r, 500));
     }
-  }, [buildSavePayload]);
+  }, [buildSavePayload, broadcastSaved, adoptServerTrip]);
 
   // null sentinel so the streaming→ready transition is detected on the first
   // post-mount status change, not pre-empted by `prev === status` from frame zero.
@@ -260,6 +362,8 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
 
   useEffect(() => {
     const handler = () => {
+      const signature = signatureOf(messagesRef.current);
+      if (signature === lastSavedSignatureRef.current) return;
       const payload = buildSavePayload();
       if (!payload) return;
       const body = JSON.stringify(payload);
@@ -498,6 +602,20 @@ export function ChatPanel({ tripId }: ChatPanelProps) {
         <div className="mx-3 mb-0 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
           <p className="font-medium">Something went wrong</p>
           <p className="mt-0.5 opacity-90">{error.message}</p>
+        </div>
+      )}
+
+      {banner && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`mx-3 mb-0 rounded-md border px-3 py-1.5 text-[11px] animate-fade-up ${
+            banner.kind === "remote-conflict"
+              ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+              : "border-border/60 bg-muted/40 text-muted-foreground"
+          }`}
+        >
+          {banner.text}
         </div>
       )}
 

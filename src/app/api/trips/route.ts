@@ -3,6 +3,7 @@ import { listTrips, saveTrip, getTrip, deleteTrip } from "@/lib/trips-store";
 import { createNewTrip } from "@/lib/types";
 import { requireAuth } from "@/lib/api-auth";
 import { classifyDbError } from "@/lib/db-errors";
+import { isStaleSaveError } from "@/lib/stale-save-error";
 import { v4 as uuidv4 } from "uuid";
 
 export async function GET(req: Request) {
@@ -66,6 +67,19 @@ export async function PUT(req: Request) {
   try {
     await saveTrip(trip as Parameters<typeof saveTrip>[0], userId);
   } catch (e) {
+    if (isStaleSaveError(e) && e.serverTrip) {
+      console.warn("[chat-persist] put rejected stale", {
+        tripId,
+        payloadKB,
+        durationMs: Date.now() - started,
+        incomingMsgs: (trip as { chatHistory?: unknown[] }).chatHistory?.length ?? 0,
+        serverMsgs: e.serverTrip.chatHistory.length,
+      });
+      return NextResponse.json(
+        { error: "stale", trip: e.serverTrip },
+        { status: 409 },
+      );
+    }
     const message = e instanceof Error ? e.message : String(e);
     const code = classifyDbError(message);
     console.error("[chat-persist] put failed", {

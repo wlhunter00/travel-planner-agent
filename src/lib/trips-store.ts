@@ -1,5 +1,6 @@
 import type { Trip, TripState, ChatMessage, Recommendation } from "./types";
 import { prisma } from "./prisma";
+import { StaleSaveError } from "./stale-save-error";
 
 export interface TripIndex {
   id: string;
@@ -78,7 +79,11 @@ export async function getTrip(id: string, userId: string): Promise<Trip | null> 
   };
 }
 
-export async function saveTrip(trip: Trip, userId: string): Promise<void> {
+export async function saveTrip(
+  trip: Trip,
+  userId: string,
+  options: { force?: boolean } = {},
+): Promise<void> {
   const data = {
     name: trip.name,
     status: trip.status,
@@ -93,11 +98,58 @@ export async function saveTrip(trip: Trip, userId: string): Promise<void> {
     recommenderPriorities: (trip.recommenderPriorities ?? {}) as unknown as object,
   };
 
-  await prisma.trip.upsert({
-    where: { id: trip.id },
-    update: data,
-    create: { id: trip.id, userId, ...data },
+  // Transactional monotonic guard: refuse to overwrite a longer persisted
+  // chatHistory with a shorter incoming snapshot. See plan
+  // .cursor/plans/chat-save-race-fix_*.plan.md for the failure mode this fixes.
+  await prisma.$transaction(async (tx) => {
+    const existing = await tx.trip.findFirst({
+      where: { id: trip.id, userId },
+      select: { chatHistory: true },
+    });
+
+    if (existing && !options.force) {
+      const existingHistory = (existing.chatHistory as unknown as ChatMessage[] | null) ?? [];
+      const incomingHistory = trip.chatHistory ?? [];
+      if (incomingHistory.length < existingHistory.length) {
+        const serverTrip = await getTripWithinTx(tx, trip.id, userId);
+        if (serverTrip) {
+          throw new StaleSaveError({ kind: "trip", serverTrip });
+        }
+      }
+    }
+
+    await tx.trip.upsert({
+      where: { id: trip.id },
+      update: data,
+      create: { id: trip.id, userId, ...data },
+    });
   });
+}
+
+async function getTripWithinTx(
+  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+  id: string,
+  userId: string,
+): Promise<Trip | null> {
+  const row = await tx.trip.findFirst({ where: { id, userId } });
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    status: row.status as Trip["status"],
+    phase: row.phase as Trip["phase"],
+    destination: row.destination,
+    startDate: row.startDate,
+    endDate: row.endDate,
+    coverImage: row.coverImage ?? undefined,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    state: (row.state as unknown as TripState) ?? ({} as TripState),
+    chatHistory: ((row.chatHistory as unknown) as ChatMessage[]) ?? [],
+    recommendations: ((row.recommendations as unknown) as Recommendation[]) ?? [],
+    recommenderPriorities:
+      ((row.recommenderPriorities as unknown) as Record<string, number>) ?? {},
+  };
 }
 
 export async function deleteTrip(id: string, userId: string): Promise<void> {

@@ -5,6 +5,7 @@ import {
   saveConversation,
 } from "@/lib/conversations-store";
 import { requireAuth } from "@/lib/api-auth";
+import { isStaleSaveError } from "@/lib/stale-save-error";
 
 export async function GET() {
   const { userId, error } = await requireAuth();
@@ -31,9 +32,24 @@ export async function PUT(req: Request) {
     return NextResponse.json({ error: "Missing conversation id" }, { status: 400 });
   }
 
-  await saveConversation(
-    { id: body.id, title: body.title, messages: body.messages },
-    userId,
-  );
+  try {
+    await saveConversation(
+      { id: body.id, title: body.title, messages: body.messages },
+      userId,
+    );
+  } catch (e) {
+    if (isStaleSaveError(e) && e.serverConversation) {
+      console.warn("[chat-persist] conversation put rejected stale", {
+        conversationId: body.id,
+        incomingMsgs: Array.isArray(body.messages) ? body.messages.length : null,
+        serverMsgs: e.serverConversation.messages.length,
+      });
+      return NextResponse.json(
+        { error: "stale", conversation: e.serverConversation },
+        { status: 409 },
+      );
+    }
+    throw e;
+  }
   return NextResponse.json({ ok: true });
 }
